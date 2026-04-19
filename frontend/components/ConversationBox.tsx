@@ -683,28 +683,28 @@ export default function ConversationBox() {
             {completeData.session_id && (
               <button
                 onClick={() => {
-                  // Save to localStorage right before navigating (synchronous guarantee)
-                  try {
-                    const sid = completeData.session_id
-                    const stored = localStorage.getItem(`result_${sid}`)
-                    if (!stored) {
-                      localStorage.setItem(`result_${sid}`, JSON.stringify({
-                        session: { session_id: sid, status: 'completed', final_classification: completeData.classification },
-                        proposal: completeData.final_proposal,
-                        analysis: {
-                          feasibility_score: completeData.analysis.feasibility_score,
-                          pass_probability: completeData.analysis.pass_probability,
-                          expected_duration_days: completeData.analysis.expected_duration_days,
-                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                          similar_cases: (completeData as any).similar_cases || [],
-                          visualization_data: { timeline: [] },
-                        },
-                        review: completeData.review,
-                        download_url: completeData.download_url,
-                      }))
-                    }
-                  } catch {}
-                  router.push(`/result/${completeData.session_id}`)
+                  const sid = completeData.session_id
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const resultPayload = {
+                    session: { session_id: sid, status: 'completed', final_classification: completeData.classification },
+                    proposal: completeData.final_proposal,
+                    analysis: {
+                      feasibility_score: completeData.analysis.feasibility_score,
+                      pass_probability: completeData.analysis.pass_probability,
+                      expected_duration_days: completeData.analysis.expected_duration_days,
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      similar_cases: (completeData as any).similar_cases || [],
+                      visualization_data: { timeline: [] },
+                    },
+                    review: completeData.review,
+                    download_url: completeData.download_url,
+                  }
+                  // 3중 저장으로 완전 보장
+                  try { sessionStorage.setItem('__pending_result', JSON.stringify({ sid, data: resultPayload })) } catch {}
+                  try { localStorage.setItem(`result_${sid}`, JSON.stringify(resultPayload)) } catch {}
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  try { (window as any).__pendingResult = { sid, data: resultPayload } } catch {}
+                  router.push(`/result/${sid}`)
                 }}
                 className="flex items-center gap-2 px-4 py-3 bg-white text-blue-600 border border-blue-300 rounded-xl font-semibold hover:bg-blue-50 transition-colors"
               >

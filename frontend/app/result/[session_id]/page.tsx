@@ -57,21 +57,46 @@ export default function ResultPage() {
 
   useEffect(() => {
     if (!sessionId) return
-    // Try localStorage first (primary source for Vercel ephemeral DB)
+
+    // 1순위: window.__pendingResult (same-tab navigation, 가장 신뢰성 높음)
     try {
-      const stored = localStorage.getItem(`result_${sessionId}`)
-      if (stored) {
-        const d = JSON.parse(stored)
-        setResult(d)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pending = (window as any).__pendingResult
+      if (pending && pending.sid === sessionId) {
+        setResult(pending.data)
         setLoading(false)
         return
       }
     } catch {}
-    // Fallback to API
+
+    // 2순위: sessionStorage (same-tab, 동기 보장)
+    try {
+      const raw = sessionStorage.getItem('__pending_result')
+      if (raw) {
+        const { sid, data } = JSON.parse(raw)
+        if (sid === sessionId) {
+          setResult(data)
+          setLoading(false)
+          return
+        }
+      }
+    } catch {}
+
+    // 3순위: localStorage (이전 방문 데이터)
+    try {
+      const stored = localStorage.getItem(`result_${sessionId}`)
+      if (stored) {
+        setResult(JSON.parse(stored))
+        setLoading(false)
+        return
+      }
+    } catch {}
+
+    // 4순위: API (DB가 ephemeral이라 실패할 수 있음)
     fetch(`${API_BASE}/api/session/${sessionId}/result`)
-      .then((r) => { if (!r.ok) throw new Error('결과를 불러올 수 없습니다.'); return r.json() })
+      .then((r) => { if (!r.ok) throw new Error('not_found'); return r.json() })
       .then(setResult)
-      .catch((e) => setError(e.message))
+      .catch(() => setError('no_data'))
       .finally(() => setLoading(false))
   }, [sessionId])
 
@@ -114,13 +139,19 @@ export default function ResultPage() {
 
   if (error || !result) return (
     <div className="min-h-screen flex items-center justify-center">
-      <div className="text-center space-y-3">
-        <p className="text-red-500 font-semibold">결과 데이터를 찾을 수 없습니다.</p>
-        <p className="text-sm text-gray-500">
-          민원 작성을 완료한 뒤 화면에서 &apos;상세 결과 보기&apos; 버튼을 클릭하면<br />
-          결과를 확인할 수 있습니다.
+      <div className="text-center space-y-3 max-w-sm">
+        <p className="text-red-500 font-semibold text-lg">결과를 불러올 수 없습니다</p>
+        <p className="text-sm text-gray-500 leading-relaxed">
+          민원 작성을 완료한 후 결과 화면에서<br />
+          <strong>&#39;상세 결과 보기&#39;</strong> 버튼을 눌러 이동해주세요.<br />
+          URL을 직접 입력하면 데이터가 없을 수 있습니다.
         </p>
-        <button onClick={() => router.push('/')} className="text-blue-600 underline text-sm">홈으로 돌아가기</button>
+        <button
+          onClick={() => router.push('/')}
+          className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition"
+        >
+          홈으로 돌아가기
+        </button>
       </div>
     </div>
   )
