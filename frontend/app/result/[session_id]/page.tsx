@@ -9,6 +9,8 @@ import {
 } from 'recharts'
 import { FileText, Download, Loader2 } from 'lucide-react'
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+
 interface SessionResult {
   session: { session_id: string; status: string; final_classification: string }
   proposal: {
@@ -21,6 +23,8 @@ interface SessionResult {
     feasibility_score: number
     visualization_data: { timeline: Array<{ name: string; value: number }> }
   } | null
+  review?: { validity_score: number; strengths: string[]; weaknesses: string[] } | null
+  download_url?: string | null
 }
 
 interface BillArticle { article_number: number; title: string; content: string }
@@ -53,7 +57,18 @@ export default function ResultPage() {
 
   useEffect(() => {
     if (!sessionId) return
-    fetch(`/api/session/${sessionId}/result`)
+    // Try localStorage first (primary source for Vercel ephemeral DB)
+    try {
+      const stored = localStorage.getItem(`result_${sessionId}`)
+      if (stored) {
+        const d = JSON.parse(stored)
+        setResult(d)
+        setLoading(false)
+        return
+      }
+    } catch {}
+    // Fallback to API
+    fetch(`${API_BASE}/api/session/${sessionId}/result`)
       .then((r) => { if (!r.ok) throw new Error('결과를 불러올 수 없습니다.'); return r.json() })
       .then(setResult)
       .catch((e) => setError(e.message))
@@ -64,7 +79,7 @@ export default function ResultPage() {
     setBillLoading(true)
     setBillError(null)
     try {
-      const r = await fetch(`/api/session/${sessionId}/bill`, { method: 'POST' })
+      const r = await fetch(`${API_BASE}/api/session/${sessionId}/bill`, { method: 'POST' })
       if (!r.ok) {
         const err = await r.json()
         throw new Error(err.detail || '법안 생성 실패')
@@ -106,7 +121,7 @@ export default function ResultPage() {
     </div>
   )
 
-  const { session, proposal, analysis } = result
+  const { session, proposal, analysis, review, download_url } = result
   const canGenerateBill = ['제안', '청원'].includes(session.final_classification)
 
   const radialData = analysis ? [
@@ -173,6 +188,15 @@ export default function ResultPage() {
                 </div>
               </div>
             )}
+            {download_url && (
+              <a
+                href={`${API_BASE}${download_url}`}
+                download
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition"
+              >
+                <Download size={16} /> DOCX 다운로드
+              </a>
+            )}
           </div>
         ) : (
           <div className="bg-white rounded-2xl shadow-md p-6 text-center text-gray-400">제안서 데이터가 없습니다.</div>
@@ -230,6 +254,28 @@ export default function ResultPage() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* AI 검토 의견 (localStorage에서 복원) */}
+        {review && (
+          <div className="bg-white rounded-2xl shadow-md p-6 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-gray-800">AI 검토 의견</h2>
+              <span className="text-sm font-bold text-blue-600">타당성 {Math.round(review.validity_score * 100)}점</span>
+            </div>
+            {review.strengths?.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-green-700 mb-1">강점</p>
+                <ul className="text-sm text-gray-700 space-y-0.5">{review.strengths.map((s, i) => <li key={i}>✓ {s}</li>)}</ul>
+              </div>
+            )}
+            {review.weaknesses?.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-amber-700 mb-1">보완점</p>
+                <ul className="text-sm text-gray-700 space-y-0.5">{review.weaknesses.map((w, i) => <li key={i}>△ {w}</li>)}</ul>
+              </div>
+            )}
           </div>
         )}
 

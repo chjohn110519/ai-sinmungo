@@ -99,6 +99,15 @@ function persistSession(sid: string) {
   } catch {}
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function upsertComplaintSummary(summary: { session_id: string; title: string | null; classification: string | null; status: string; created_at: string }) {
+  try {
+    const summaries = JSON.parse(localStorage.getItem('complaint_summaries') || '[]') as typeof summary[]
+    const filtered = summaries.filter(s => s.session_id !== summary.session_id)
+    localStorage.setItem('complaint_summaries', JSON.stringify([summary, ...filtered].slice(0, 50)))
+  } catch {}
+}
+
 export default function ConversationBox() {
   const [stage, setStage] = useState<Stage>('idle')
   const [input, setInput] = useState('')
@@ -140,6 +149,13 @@ export default function ConversationBox() {
       setAnswers({})
       setStage('questioning')
       persistSession(data.session_id)
+      upsertComplaintSummary({
+        session_id: data.session_id,
+        title: null,
+        classification: data.classification,
+        status: 'in_progress',
+        created_at: new Date().toISOString(),
+      })
       setInput('')
       setAttachments([])
     } catch (e: unknown) {
@@ -199,6 +215,31 @@ export default function ConversationBox() {
       const data: CompleteState = await res.json()
       setCompleteData(data)
       setStage('complete')
+      // Persist result data and complaint summary to localStorage
+      try {
+        const sessionId = improvingData.session_id
+        localStorage.setItem(`result_${sessionId}`, JSON.stringify({
+          session: { session_id: sessionId, status: 'completed', final_classification: data.classification },
+          proposal: data.final_proposal,
+          analysis: {
+            feasibility_score: data.analysis.feasibility_score,
+            pass_probability: data.analysis.pass_probability,
+            expected_duration_days: data.analysis.expected_duration_days,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            similar_cases: (data as any).similar_cases || [],
+            visualization_data: { timeline: [] },
+          },
+          review: data.review,
+          download_url: data.download_url,
+        }))
+        upsertComplaintSummary({
+          session_id: sessionId,
+          title: data.final_proposal.title,
+          classification: data.classification,
+          status: 'completed',
+          created_at: new Date().toISOString(),
+        })
+      } catch {}
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '오류가 발생했습니다.')
     } finally {

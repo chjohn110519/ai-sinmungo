@@ -159,20 +159,42 @@ keywords에는 관련 핵심 키워드 목록을 작성하세요."""
         self, user_input: str, structured_problem: StructuredProblem, responsible_dept: str
     ) -> PolicyProposal:
         """구조화된 문제에서 정책 제안서 생성"""
-        prompt = f"""다음 정보를 바탕으로 법안 형식의 정책 제안서를 작성하세요:
+        prompt = f"""당신은 대한민국 국회 입법조사처 수석 연구원입니다.
+실제 국회에서 통과된 법안 수준의 상세하고 설득력 있는 정책 제안서를 작성하세요.
 
-배경: {user_input}
-원인: {structured_problem.cause}
+[입력 정보]
+민원/제안 내용: {user_input}
+문제 원인 분석: {structured_problem.cause}
 영향받는 대상: {structured_problem.affected_subjects}
 해결 방향: {structured_problem.resolution_direction}
 담당 부처: {responsible_dept}
 
-title에는 법안명(예: ○○법 제정안)을,
-background에는 제안이유(1-2문단)를,
-core_requests에는 주요내용(3-4가지 핵심 사항)을,
-expected_effects에는 기대효과(3-4가지)를,
-related_laws에는 관련 법령 이름 목록을 작성하세요.
-responsible_dept는 "{responsible_dept}"로 설정하세요."""
+[각 필드 작성 지침]
+
+title: "○○에 관한 ○○법 개정 요청" 또는 "○○ 안전 강화를 위한 ○○ 개선 제안" 형식의 공식 제목
+
+background (500자 이상):
+- 현황 및 문제점을 구체적 수치·통계와 함께 서술
+- 문제의 심각성과 사회적 파급 효과
+- 현행 법령·제도의 한계 및 공백 분석
+- 유사 선진국(일본, 독일, 영국 등) 제도 비교 가능시 포함
+- 개선이 시급한 이유를 다각도로 논거
+
+core_requests (500자 이상):
+- 최소 5개의 구체적 정책 요청 사항
+- 각 요청에 대해 "○○법 제○조에 따라..." 형식으로 법적 근거 명시
+- 단계별 이행 방안(1단계: 즉시 조치, 2단계: 6개월 내, 3단계: 1년 내) 포함
+- 예산 규모나 인원 등 구체적 실행 방안 제시
+
+expected_effects (300자 이상):
+- 직접 효과 3가지 이상 (정량적 목표 포함, 예: "연간 피해 건수 30% 감소")
+- 간접 효과 2가지 이상 (사회적·경제적 파급효과)
+- 수혜 대상별 기대 효과 구분
+
+related_laws: 관련 한국 법령 7개 이상 (예: 도로교통법, 지방자치법, 행정절차법 등 실제 법령명)
+responsible_dept: "{responsible_dept}"
+
+실제 통과된 국민청원·민원 보고서 수준으로 전문적이고 설득력 있게 작성하세요."""
 
         if self.openai_client is not None:
             try:
@@ -180,12 +202,12 @@ responsible_dept는 "{responsible_dept}"로 설정하세요."""
                     return self.openai_client.chat.completions.create(
                         model=settings.openai_model_name,
                         messages=[
-                            {"role": "system", "content": "당신은 대한민국 정책 입법 전문가입니다."},
+                            {"role": "system", "content": "당신은 대한민국 국회 입법조사처 수석 연구원으로, 실제 통과된 법안 수준의 정책 제안서를 작성합니다."},
                             {"role": "user", "content": prompt},
                         ],
                         response_model=PolicyProposal,
-                        max_tokens=1024,
-                        temperature=0.3,
+                        max_tokens=3000,
+                        temperature=0.4,
                     )
                 else:
                     return self._openai_proposal_fallback(prompt, user_input, structured_problem, responsible_dept)
@@ -197,14 +219,14 @@ responsible_dept는 "{responsible_dept}"로 설정하세요."""
                 if INSTRUCTOR_AVAILABLE:
                     return self.anthropic_client.messages.create(
                         model=settings.anthropic_model_name,
-                        max_tokens=1024,
+                        max_tokens=3000,
                         messages=[{"role": "user", "content": prompt}],
                         response_model=PolicyProposal,
                     )
                 else:
                     response = self.anthropic_client.messages.create(
                         model=settings.anthropic_model_name,
-                        max_tokens=1024,
+                        max_tokens=3000,
                         messages=[{"role": "user", "content": prompt}],
                     )
                     return self._parse_policy_proposal(
@@ -221,11 +243,11 @@ responsible_dept는 "{responsible_dept}"로 설정하세요."""
         response = self.openai_client.chat.completions.create(
             model=settings.openai_model_name,
             messages=[
-                {"role": "system", "content": "당신은 대한민국 정책 입법 전문가입니다."},
+                {"role": "system", "content": "당신은 대한민국 국회 입법조사처 수석 연구원으로, 실제 통과된 법안 수준의 정책 제안서를 작성합니다."},
                 {"role": "user", "content": prompt},
             ],
-            max_tokens=1024,
-            temperature=0.3,
+            max_tokens=3000,
+            temperature=0.4,
         )
         return self._parse_policy_proposal(
             response.choices[0].message.content, user_input, structured_problem, responsible_dept

@@ -153,7 +153,7 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
     routing = _router_agent.route_message(full_message)
 
     # 명확화 질문 생성
-    questions = _questioner.generate(full_message, routing.classification, n=4)
+    questions = _questioner.generate(full_message, routing.classification, n=5)
 
     ctx = {
         "stage": "questioning",

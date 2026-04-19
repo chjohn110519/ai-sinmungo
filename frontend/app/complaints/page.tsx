@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
-import { Search, Filter, RefreshCw, ExternalLink, Clock, CheckCircle, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Search, Filter, RefreshCw, ExternalLink, Clock, CheckCircle, AlertCircle, ChevronLeft, ChevronRight, Heart } from 'lucide-react'
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 
 interface ComplaintItem {
   session_id: string
@@ -43,6 +45,26 @@ function StatusIcon({ status }: { status: string }) {
   return <Clock className="h-4 w-4 text-blue-500 animate-pulse" />
 }
 
+function getLocalComplaints(statusFilter: string, classFilter: string, page: number, pageSize = 15): ComplaintsResponse {
+  try {
+    const summaries: ComplaintItem[] = JSON.parse(localStorage.getItem('complaint_summaries') || '[]')
+    let filtered = summaries
+    if (statusFilter) filtered = filtered.filter(i => i.status === statusFilter)
+    if (classFilter) filtered = filtered.filter(i => i.classification === classFilter)
+    const total = filtered.length
+    const start = (page - 1) * pageSize
+    return {
+      total,
+      page,
+      page_size: pageSize,
+      total_pages: Math.max(1, Math.ceil(total / pageSize)),
+      items: filtered.slice(start, start + pageSize),
+    }
+  } catch {
+    return { total: 0, page: 1, page_size: 15, total_pages: 1, items: [] }
+  }
+}
+
 export default function ComplaintsPage() {
   const [data, setData] = useState<ComplaintsResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -51,23 +73,60 @@ export default function ComplaintsPage() {
   const [classFilter, setClassFilter] = useState('')
   const [myOnly, setMyOnly] = useState(false)
   const [myIds, setMyIds] = useState<Set<string>>(new Set())
+  const [likedIds, setLikedIds] = useState<Set<string>>(new Set())
+  const [heartCounts, setHeartCounts] = useState<Record<string, number>>({})
 
   useEffect(() => {
     try {
       const stored = JSON.parse(localStorage.getItem('complaint_sessions') || '[]')
       setMyIds(new Set(stored))
+      const liked = JSON.parse(localStorage.getItem('my_hearts') || '[]')
+      setLikedIds(new Set(liked))
+      const counts = JSON.parse(localStorage.getItem('heart_counts') || '{}')
+      setHeartCounts(counts)
     } catch {}
   }, [])
+
+  const toggleHeart = (sessionId: string) => {
+    setLikedIds(prev => {
+      const next = new Set(prev)
+      const isLiked = next.has(sessionId)
+      if (isLiked) {
+        next.delete(sessionId)
+      } else {
+        next.add(sessionId)
+      }
+      try { localStorage.setItem('my_hearts', JSON.stringify([...next])) } catch {}
+      return next
+    })
+    setHeartCounts(prev => {
+      const count = prev[sessionId] || 0
+      const isLiked = likedIds.has(sessionId)
+      const next = { ...prev, [sessionId]: Math.max(0, isLiked ? count - 1 : count + 1) }
+      try { localStorage.setItem('heart_counts', JSON.stringify(next)) } catch {}
+      return next
+    })
+  }
 
   const fetchData = useCallback(() => {
     setLoading(true)
     const params = new URLSearchParams({ page: String(page), page_size: '15' })
     if (statusFilter) params.set('status', statusFilter)
     if (classFilter) params.set('classification', classFilter)
-    fetch(`/api/sessions?${params}`)
-      .then((r) => r.json())
-      .then(setData)
-      .catch(console.error)
+
+    fetch(`${API_BASE}/api/sessions?${params}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((apiData) => {
+        if (apiData && apiData.items?.length > 0) {
+          setData(apiData)
+        } else {
+          // Fallback to localStorage
+          setData(getLocalComplaints(statusFilter, classFilter, page))
+        }
+      })
+      .catch(() => {
+        setData(getLocalComplaints(statusFilter, classFilter, page))
+      })
       .finally(() => setLoading(false))
   }, [page, statusFilter, classFilter])
 
@@ -163,61 +222,82 @@ export default function ComplaintsPage() {
                     <th className="px-5 py-3">유형</th>
                     <th className="px-5 py-3">상태</th>
                     <th className="px-5 py-3">제안서 제목</th>
+                    <th className="px-5 py-3 text-center">공감</th>
                     <th className="px-5 py-3">바로가기</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {displayItems.map((item) => (
-                    <tr
-                      key={item.session_id}
-                      className={`hover:bg-blue-50/40 transition ${myIds.has(item.session_id) ? 'bg-blue-50/20' : ''}`}
-                    >
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-2">
-                          {myIds.has(item.session_id) && (
-                            <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full font-semibold">나</span>
-                          )}
-                          <span className="font-mono text-xs text-gray-500">{item.session_id.slice(0, 8)}…</span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 text-gray-600">
-                        {item.created_at
-                          ? new Date(item.created_at).toLocaleString('ko-KR', {
-                              month: '2-digit', day: '2-digit',
-                              hour: '2-digit', minute: '2-digit',
-                            })
-                          : '-'}
-                      </td>
-                      <td className="px-5 py-4">
-                        {item.classification ? (
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${CLASS_COLOR[item.classification] || 'bg-gray-100 text-gray-600'}`}>
-                            {item.classification}
+                  {displayItems.map((item) => {
+                    const isLiked = likedIds.has(item.session_id)
+                    const heartCount = heartCounts[item.session_id] || 0
+                    const isMine = myIds.has(item.session_id)
+                    return (
+                      <tr
+                        key={item.session_id}
+                        className={`hover:bg-blue-50/40 transition ${isMine ? 'bg-blue-50/20' : ''}`}
+                      >
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-2">
+                            {isMine && (
+                              <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full font-semibold">나</span>
+                            )}
+                            <span className="font-mono text-xs text-gray-500">{item.session_id.slice(0, 8)}…</span>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4 text-gray-600">
+                          {item.created_at
+                            ? new Date(item.created_at).toLocaleString('ko-KR', {
+                                month: '2-digit', day: '2-digit',
+                                hour: '2-digit', minute: '2-digit',
+                              })
+                            : '-'}
+                        </td>
+                        <td className="px-5 py-4">
+                          {item.classification ? (
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${CLASS_COLOR[item.classification] || 'bg-gray-100 text-gray-600'}`}>
+                              {item.classification}
+                            </span>
+                          ) : <span className="text-gray-400">-</span>}
+                        </td>
+                        <td className="px-5 py-4">
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold border ${STATUS_COLOR[item.status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                            <StatusIcon status={item.status} />
+                            {STATUS_KO[item.status] || item.status}
                           </span>
-                        ) : <span className="text-gray-400">-</span>}
-                      </td>
-                      <td className="px-5 py-4">
-                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold border ${STATUS_COLOR[item.status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
-                          <StatusIcon status={item.status} />
-                          {STATUS_KO[item.status] || item.status}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4 text-gray-700 max-w-[220px] truncate">
-                        {item.proposal_title || <span className="text-gray-400">-</span>}
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-2">
-                          <Link href={`/status/${item.session_id}`} className="text-xs text-gray-500 hover:text-blue-600 hover:underline">
-                            현황
-                          </Link>
-                          {item.status === 'completed' && (
-                            <Link href={`/result/${item.session_id}`} className="text-xs text-blue-600 hover:underline flex items-center gap-0.5">
-                              결과 <ExternalLink className="h-3 w-3" />
+                        </td>
+                        <td className="px-5 py-4 text-gray-700 max-w-[220px] truncate">
+                          {item.proposal_title || <span className="text-gray-400">-</span>}
+                        </td>
+                        <td className="px-5 py-4 text-center">
+                          <button
+                            onClick={() => !isMine && toggleHeart(item.session_id)}
+                            disabled={isMine}
+                            title={isMine ? '내 민원에는 공감할 수 없습니다' : (isLiked ? '공감 취소' : '공감하기')}
+                            className={`inline-flex items-center gap-1 text-xs font-semibold transition rounded-full px-2 py-1 ${
+                              isMine ? 'text-gray-300 cursor-not-allowed' :
+                              isLiked ? 'text-rose-600 bg-rose-50 hover:bg-rose-100' :
+                              'text-gray-400 hover:text-rose-500 hover:bg-rose-50'
+                            }`}
+                          >
+                            <Heart className={`h-3.5 w-3.5 ${isLiked ? 'fill-current' : ''}`} />
+                            {heartCount > 0 ? heartCount : ''}
+                          </button>
+                        </td>
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-2">
+                            <Link href={`/status/${item.session_id}`} className="text-xs text-gray-500 hover:text-blue-600 hover:underline">
+                              현황
                             </Link>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            {item.status === 'completed' && (
+                              <Link href={`/result/${item.session_id}`} className="text-xs text-blue-600 hover:underline flex items-center gap-0.5">
+                                결과 <ExternalLink className="h-3 w-3" />
+                              </Link>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
