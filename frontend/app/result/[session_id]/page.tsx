@@ -114,9 +114,13 @@ export default function ResultPage() {
 
   if (error || !result) return (
     <div className="min-h-screen flex items-center justify-center">
-      <div className="text-center">
-        <p className="text-red-500 mb-4">{error || '결과를 찾을 수 없습니다.'}</p>
-        <button onClick={() => router.push('/')} className="text-blue-600 underline">홈으로 돌아가기</button>
+      <div className="text-center space-y-3">
+        <p className="text-red-500 font-semibold">결과 데이터를 찾을 수 없습니다.</p>
+        <p className="text-sm text-gray-500">
+          민원 작성을 완료한 뒤 화면에서 &apos;상세 결과 보기&apos; 버튼을 클릭하면<br />
+          결과를 확인할 수 있습니다.
+        </p>
+        <button onClick={() => router.push('/')} className="text-blue-600 underline text-sm">홈으로 돌아가기</button>
       </div>
     </div>
   )

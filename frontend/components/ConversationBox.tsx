@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { Send, Mic, MicOff, Download, CheckCircle, Circle, ChevronRight, FileText, Paperclip, X, Image as ImageIcon } from 'lucide-react'
-import Link from 'next/link'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 const STORAGE_KEY = 'complaint_sessions'
@@ -109,6 +109,7 @@ function upsertComplaintSummary(summary: { session_id: string; title: string | n
 }
 
 export default function ConversationBox() {
+  const router = useRouter()
   const [stage, setStage] = useState<Stage>('idle')
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -680,12 +681,35 @@ export default function ConversationBox() {
               DOCX 다운로드
             </a>
             {completeData.session_id && (
-              <Link
-                href={`/result/${completeData.session_id}`}
+              <button
+                onClick={() => {
+                  // Save to localStorage right before navigating (synchronous guarantee)
+                  try {
+                    const sid = completeData.session_id
+                    const stored = localStorage.getItem(`result_${sid}`)
+                    if (!stored) {
+                      localStorage.setItem(`result_${sid}`, JSON.stringify({
+                        session: { session_id: sid, status: 'completed', final_classification: completeData.classification },
+                        proposal: completeData.final_proposal,
+                        analysis: {
+                          feasibility_score: completeData.analysis.feasibility_score,
+                          pass_probability: completeData.analysis.pass_probability,
+                          expected_duration_days: completeData.analysis.expected_duration_days,
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                          similar_cases: (completeData as any).similar_cases || [],
+                          visualization_data: { timeline: [] },
+                        },
+                        review: completeData.review,
+                        download_url: completeData.download_url,
+                      }))
+                    }
+                  } catch {}
+                  router.push(`/result/${completeData.session_id}`)
+                }}
                 className="flex items-center gap-2 px-4 py-3 bg-white text-blue-600 border border-blue-300 rounded-xl font-semibold hover:bg-blue-50 transition-colors"
               >
                 상세 결과 보기
-              </Link>
+              </button>
             )}
           </div>
 
