@@ -1,8 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { useRouter } from 'next/navigation'
-import { Send, Mic, MicOff, Download, CheckCircle, Circle, ChevronRight, FileText, Paperclip, X, Image as ImageIcon } from 'lucide-react'
+import { Send, Mic, MicOff, Download, CheckCircle, Circle, ChevronRight, FileText, Paperclip, X, Image as ImageIcon, Expand } from 'lucide-react'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 const STORAGE_KEY = 'complaint_sessions'
@@ -109,7 +108,6 @@ function upsertComplaintSummary(summary: { session_id: string; title: string | n
 }
 
 export default function ConversationBox() {
-  const router = useRouter()
   const [stage, setStage] = useState<Stage>('idle')
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -123,6 +121,7 @@ export default function ConversationBox() {
   const [acceptedIds, setAcceptedIds] = useState<Set<number>>(new Set())
   const [userNote, setUserNote] = useState('')
   const [completeData, setCompleteData] = useState<CompleteState | null>(null)
+  const [showDetailModal, setShowDetailModal] = useState(false)
 
   // Attachments
   const [attachments, setAttachments] = useState<AttachmentPreview[]>([])
@@ -680,37 +679,13 @@ export default function ConversationBox() {
               <Download size={18} />
               DOCX 다운로드
             </a>
-            {completeData.session_id && (
-              <button
-                onClick={() => {
-                  const sid = completeData.session_id
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  const resultPayload = {
-                    session: { session_id: sid, status: 'completed', final_classification: completeData.classification },
-                    proposal: completeData.final_proposal,
-                    analysis: {
-                      feasibility_score: completeData.analysis.feasibility_score,
-                      pass_probability: completeData.analysis.pass_probability,
-                      expected_duration_days: completeData.analysis.expected_duration_days,
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      similar_cases: (completeData as any).similar_cases || [],
-                      visualization_data: { timeline: [] },
-                    },
-                    review: completeData.review,
-                    download_url: completeData.download_url,
-                  }
-                  // 3중 저장으로 완전 보장
-                  try { sessionStorage.setItem('__pending_result', JSON.stringify({ sid, data: resultPayload })) } catch {}
-                  try { localStorage.setItem(`result_${sid}`, JSON.stringify(resultPayload)) } catch {}
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  try { (window as any).__pendingResult = { sid, data: resultPayload } } catch {}
-                  router.push(`/result/${sid}`)
-                }}
-                className="flex items-center gap-2 px-4 py-3 bg-white text-blue-600 border border-blue-300 rounded-xl font-semibold hover:bg-blue-50 transition-colors"
-              >
-                상세 결과 보기
-              </button>
-            )}
+            <button
+              onClick={() => setShowDetailModal(true)}
+              className="flex items-center gap-2 px-4 py-3 bg-white text-blue-600 border border-blue-300 rounded-xl font-semibold hover:bg-blue-50 transition-colors"
+            >
+              <Expand size={16} />
+              상세 결과 보기
+            </button>
           </div>
 
           <button
@@ -719,6 +694,121 @@ export default function ConversationBox() {
           >
             새 민원 작성하기
           </button>
+        </div>
+      )}
+
+      {/* ── 전체 결과 모달 ────────────────────────────────────────────────────── */}
+      {showDetailModal && completeData && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-gray-50 overflow-y-auto">
+          {/* 모달 헤더 */}
+          <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm">
+            <h2 className="font-bold text-gray-900 text-base truncate">{completeData.final_proposal.title}</h2>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <a
+                href={`${API_BASE}${completeData.download_url}`}
+                download
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition"
+              >
+                <Download size={14} /> DOCX
+              </a>
+              <button
+                onClick={() => setShowDetailModal(false)}
+                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"
+              >
+                <X size={20} />
+              </button>
+            </div>
+          </div>
+
+          <div className="max-w-3xl mx-auto w-full px-4 py-6 space-y-6">
+            {/* 분류 + 담당 */}
+            <div className="flex items-center gap-3">
+              <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                completeData.classification === '민원' ? 'bg-orange-100 text-orange-700' :
+                completeData.classification === '제안' ? 'bg-blue-100 text-blue-700' :
+                'bg-purple-100 text-purple-700'
+              }`}>{completeData.classification}</span>
+              <span className="text-sm text-gray-500">{completeData.final_proposal.responsible_dept}</span>
+            </div>
+
+            {/* 분석 지표 */}
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { label: '실현 가능성', value: `${Math.round(completeData.analysis.feasibility_score * 100)}%`, color: 'text-blue-600' },
+                { label: '통과 예상 확률', value: `${Math.round(completeData.analysis.pass_probability * 100)}%`, color: 'text-emerald-600' },
+                { label: '예상 처리 기간', value: `${completeData.analysis.expected_duration_days}일`, color: 'text-purple-600' },
+              ].map(m => (
+                <div key={m.label} className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 text-center">
+                  <div className={`text-3xl font-bold ${m.color}`}>{m.value}</div>
+                  <div className="text-xs text-gray-500 mt-1">{m.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* 제안서 전문 */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 space-y-5">
+              <h3 className="text-lg font-bold text-gray-900">📄 최종 제안서 전문</h3>
+              {[
+                { label: '제안 배경', content: completeData.final_proposal.background },
+                { label: '주요 요청 사항', content: completeData.final_proposal.core_requests },
+                { label: '기대 효과', content: completeData.final_proposal.expected_effects },
+              ].map(s => (
+                <div key={s.label} className="border-t border-gray-100 pt-4 first:border-0 first:pt-0">
+                  <h4 className="text-sm font-bold text-gray-700 mb-2">{s.label}</h4>
+                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{s.content}</p>
+                </div>
+              ))}
+              {completeData.final_proposal.related_laws.length > 0 && (
+                <div className="border-t border-gray-100 pt-4">
+                  <h4 className="text-sm font-bold text-gray-700 mb-2">관련 법령</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {completeData.final_proposal.related_laws.map((law, i) => (
+                      <span key={i} className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded-full border border-blue-200">{law}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* AI 검토 의견 */}
+            {completeData.review && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-bold text-gray-900">AI 검토 의견</h3>
+                  <span className="text-sm font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+                    타당성 {Math.round(completeData.review.validity_score * 100)}점
+                  </span>
+                </div>
+                {completeData.review.strengths?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-green-700 mb-2">✅ 강점</p>
+                    <ul className="space-y-1">
+                      {completeData.review.strengths.map((s, i) => (
+                        <li key={i} className="text-sm text-gray-700 flex gap-2"><span className="text-green-500 flex-shrink-0">✓</span>{s}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {completeData.review.weaknesses?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-amber-700 mb-2">⚠ 보완점</p>
+                    <ul className="space-y-1">
+                      {completeData.review.weaknesses.map((w, i) => (
+                        <li key={i} className="text-sm text-gray-700 flex gap-2"><span className="text-amber-500 flex-shrink-0">△</span>{w}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <button
+              onClick={() => setShowDetailModal(false)}
+              className="w-full py-3 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-xl bg-white"
+            >
+              닫기
+            </button>
+          </div>
         </div>
       )}
     </div>
