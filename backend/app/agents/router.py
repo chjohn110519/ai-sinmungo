@@ -1,0 +1,147 @@
+from app.config import settings
+from app.schemas.routing import RoutingResult
+
+try:
+    import instructor
+    from anthropic import Anthropic
+    from openai import OpenAI
+    INSTRUCTOR_AVAILABLE = True
+except ImportError:
+    INSTRUCTOR_AVAILABLE = False
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        Anthropic = None
+    try:
+        from openai import OpenAI
+    except ImportError:
+        OpenAI = None
+
+
+SYSTEM_PROMPT = "당신은 국민신문고 민원 분류 전문가입니다."
+
+CLASSIFY_PROMPT = """사용자 입력을 분석하여 민원/제안/청원 중 하나로 정확히 분류하세요.
+
+- 민원: 행정기관에 특정 행위를 요구하거나 불편함을 신고하는 내용
+- 제안: 정책이나 제도의 개선 또는 새로운 아이디어를 제안하는 내용
+- 청원: 법률·제도의 제정/개폐 또는 공공 문제 해결을 국가에 청원하는 내용
+
+사용자 입력: {message}"""
+
+
+class AIRouter:
+    def __init__(self):
+        self.openai_client = None
+        self.anthropic_client = None
+
+        if INSTRUCTOR_AVAILABLE:
+            if settings.openai_api_key:
+                try:
+                    self.openai_client = instructor.from_openai(
+                        OpenAI(api_key=settings.openai_api_key)
+                    )
+                except Exception:
+                    pass
+            if settings.anthropic_api_key:
+                try:
+                    self.anthropic_client = instructor.from_anthropic(
+                        Anthropic(api_key=settings.anthropic_api_key)
+                    )
+                except Exception:
+                    pass
+        else:
+            if settings.openai_api_key:
+                try:
+                    self.openai_client = OpenAI(api_key=settings.openai_api_key)
+                except Exception:
+                    pass
+            if Anthropic and settings.anthropic_api_key:
+                try:
+                    self.anthropic_client = Anthropic(api_key=settings.anthropic_api_key)
+                except Exception:
+                    pass
+
+    def route_message(self, message: str) -> RoutingResult:
+        """사용자 메시지를 민원/제안/청원으로 분류"""
+        prompt = CLASSIFY_PROMPT.format(message=message)
+
+        if self.openai_client is not None:
+            try:
+                if INSTRUCTOR_AVAILABLE:
+                    return self.openai_client.chat.completions.create(
+                        model=settings.openai_model_name,
+                        messages=[
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user", "content": prompt},
+                        ],
+                        response_model=RoutingResult,
+                        max_tokens=512,
+                        temperature=0.2,
+                    )
+                else:
+                    response = self.openai_client.chat.completions.create(
+                        model=settings.openai_model_name,
+                        messages=[
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user", "content": prompt},
+                        ],
+                        max_tokens=512,
+                        temperature=0.2,
+                    )
+                    return self._fallback_parse(response.choices[0].message.content)
+            except Exception as exc:
+                print(f"OpenAI 라우터 오류: {exc}")
+
+        if self.anthropic_client is not None:
+            try:
+                if INSTRUCTOR_AVAILABLE:
+                    return self.anthropic_client.messages.create(
+                        model=settings.anthropic_model_name,
+                        max_tokens=512,
+                        messages=[{"role": "user", "content": prompt}],
+                        response_model=RoutingResult,
+                    )
+                else:
+                    response = self.anthropic_client.messages.create(
+                        model=settings.anthropic_model_name,
+                        max_tokens=512,
+                        messages=[{"role": "user", "content": prompt}],
+                    )
+                    return self._fallback_parse(response.content[0].text)
+            except Exception as exc:
+                print(f"Anthropic 라우터 오류: {exc}")
+
+        return RoutingResult(
+            classification="민원",
+            confidence=0.55,
+            responsible_dept="행정안전부",
+            reasoning="모델 클라이언트를 초기화할 수 없어 기본 분류를 반환합니다.",
+        )
+
+    def _fallback_parse(self, text: str) -> RoutingResult:
+        """Instructor 미사용 시 텍스트 파싱 폴백"""
+        result = {
+            "classification": "민원",
+            "confidence": 0.55,
+            "responsible_dept": "행정안전부",
+            "reasoning": text,
+        }
+        for line in text.splitlines():
+            line = line.strip()
+            if ":" not in line:
+                continue
+            key, _, val = line.partition(":")
+            key = key.strip().lower()
+            val = val.strip().strip('"')
+            if key == "classification" and val in {"민원", "제안", "청원"}:
+                result["classification"] = val
+            elif key == "confidence":
+                try:
+                    result["confidence"] = float(val)
+                except ValueError:
+                    pass
+            elif key == "responsible_dept":
+                result["responsible_dept"] = val
+            elif key == "reasoning":
+                result["reasoning"] = val
+        return RoutingResult(**result)
