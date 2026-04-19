@@ -20,9 +20,23 @@ app = FastAPI(
     debug=settings.debug,
 )
 
+import os as _os
+
+_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3002",
+    "http://localhost:3003",
+    "https://frontend-bay-nine-83.vercel.app",
+]
+# 환경변수로 추가 도메인 허용
+_extra = _os.environ.get("CORS_ORIGINS", "")
+if _extra:
+    _ALLOWED_ORIGINS.extend([o.strip() for o in _extra.split(",") if o.strip()])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:3002", "http://localhost:3003"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

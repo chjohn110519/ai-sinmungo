@@ -3,19 +3,24 @@ from typing import Optional
 from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 
+# Vercel 환경에서는 /tmp 경로 사용
+_IS_VERCEL = bool(os.environ.get("VERCEL"))
+_DEFAULT_DB = "sqlite:////tmp/app.db" if _IS_VERCEL else "sqlite:///./data/app.db"
+_DEFAULT_CHROMA = "/tmp/chroma" if _IS_VERCEL else "./chroma_db"
+
 
 class Settings(BaseSettings):
     model_config = ConfigDict(env_file=".env", case_sensitive=False, extra="allow")
-    
+
     # API Keys
     anthropic_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
 
     # Database
-    database_url: str = "sqlite:///./data/app.db"
+    database_url: str = _DEFAULT_DB
 
     # Chroma
-    chroma_persist_directory: str = "./data/chroma"
+    chroma_persist_directory: str = _DEFAULT_CHROMA
 
     # Models
     embedding_model_name: str = "jhgan/ko-sroberta-multitask"

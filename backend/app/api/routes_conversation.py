@@ -33,6 +33,7 @@ from app.agents.llm4_visualizer import LLM4Visualizer
 from app.agents.llm_improver import LLMImprover, Improvement
 from app.schemas.proposal import StructuredProblem
 from app.utils.doc_generator import generate_docx
+from app.config import settings
 
 router = APIRouter()
 
@@ -40,7 +41,7 @@ router = APIRouter()
 _router_agent = AIRouter()
 _questioner = LLMQuestioner()
 _structurer = LLM1Structurer()
-_searcher = LLM2Searcher(persist_dir="./chroma_db")
+_searcher = LLM2Searcher(persist_dir=settings.chroma_persist_directory)
 _reviewer = LLM3Reviewer()
 _visualizer = LLM4Visualizer()
 _improver = LLMImprover()

@@ -18,7 +18,8 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
 
-DOCS_DIR = Path("./data/documents")
+import os as _os
+DOCS_DIR = Path("/tmp/documents") if _os.environ.get("VERCEL") else Path("./data/documents")
 DOCS_DIR.mkdir(parents=True, exist_ok=True)
 
 

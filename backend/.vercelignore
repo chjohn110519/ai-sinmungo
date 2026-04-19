@@ -1,0 +1,10 @@
+uv.lock
+pyproject.toml
+.venv/
+chroma_db/
+data/
+__pycache__/
+*.pyc
+tests/
+scripts/
+notebooks/

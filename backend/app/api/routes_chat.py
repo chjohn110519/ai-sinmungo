@@ -19,12 +19,13 @@ from app.schemas.analysis import ComprehensiveAnalysisResponse
 from app.schemas.proposal import VisualAnalysis
 from app.graph.pipeline import run_pipeline, stream_pipeline, PipelineState
 from app.rag.indexer import RAGIndexer
+from app.config import settings
 
 router = APIRouter()
 
 # RAG 초기화 (서버 시작 시 1회)
 try:
-    rag_indexer = RAGIndexer(persist_dir="./chroma_db")
+    rag_indexer = RAGIndexer(persist_dir=settings.chroma_persist_directory)
     rag_indexer.initialize_with_sample_data()
 except Exception as e:
     print(f"RAG 초기화 오류: {e}")

@@ -24,12 +24,13 @@ from app.agents.llm3_reviewer import LLM3Reviewer
 from app.agents.llm4_visualizer import LLM4Visualizer
 from app.schemas.routing import RoutingResult
 from app.schemas.proposal import StructuredProblem, PolicyProposal, ProposalReview, VisualAnalysis
+from app.config import settings
 
 
 # ─── 공유 에이전트 인스턴스 ───────────────────────────────────────────────────
 _router = AIRouter()
 _structurer = LLM1Structurer()
-_searcher = LLM2Searcher(persist_dir="./chroma_db")
+_searcher = LLM2Searcher(persist_dir=settings.chroma_persist_directory)
 _reviewer = LLM3Reviewer()
 _visualizer = LLM4Visualizer()
 

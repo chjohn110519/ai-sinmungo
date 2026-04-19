@@ -14,7 +14,8 @@ from app.utils.file_extractor import extract_text
 
 router = APIRouter()
 
-UPLOAD_DIR = Path("./data/uploads")
+import os as _os
+UPLOAD_DIR = Path("/tmp/uploads") if _os.environ.get("VERCEL") else Path("./data/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
