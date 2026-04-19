@@ -9,12 +9,16 @@ const STORAGE_KEY = 'complaint_sessions'
 
 type Stage = 'idle' | 'questioning' | 'improving' | 'complete'
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Ctx = Record<string, any>
+
 interface QuestioningState {
   session_id: string
   classification: string
   responsible_dept: string
   confidence: number
   questions: string[]
+  ctx?: Ctx
 }
 
 interface Improvement {
@@ -38,6 +42,7 @@ interface ImprovingState {
   }
   improvements: Improvement[]
   related_laws: Array<{ title: string; snippet?: string }>
+  ctx?: Ctx
 }
 
 interface CompleteState {
@@ -155,7 +160,11 @@ export default function ConversationBox() {
       const res = await fetch(`${API_BASE}/api/conversation/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: questioningData.session_id, answers: stringAnswers }),
+        body: JSON.stringify({
+          session_id: questioningData.session_id,
+          answers: stringAnswers,
+          ctx: questioningData.ctx,   // 서버리스용: 컨텍스트 전달
+        }),
       })
       if (!res.ok) throw new Error(await res.text())
       const data: ImprovingState = await res.json()
@@ -183,6 +192,7 @@ export default function ConversationBox() {
           session_id: improvingData.session_id,
           accepted_improvement_ids: Array.from(acceptedIds),
           user_note: userNote,
+          ctx: improvingData.ctx,   // 서버리스용: 컨텍스트 전달
         }),
       })
       if (!res.ok) throw new Error(await res.text())

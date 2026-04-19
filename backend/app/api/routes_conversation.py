@@ -1,4 +1,7 @@
-"""다단계 대화형 민원 처리 API.
+"""다단계 대화형 민원 처리 API — Stateless 버전.
+
+컨텍스트를 DB 대신 요청/응답 페이로드로 주고받아
+서버리스(Vercel) 환경에서도 동작합니다.
 
 Stage 흐름:
   start   → 분류 + 명확화 질문 생성     (→ stage: questioning)
@@ -12,10 +15,10 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from app.storage.db import get_db
 from app.storage.models import (
@@ -57,53 +60,83 @@ class StartRequest(BaseModel):
 
 class AnswerRequest(BaseModel):
     session_id: str
-    answers: dict[str, str]   # question index → answer text
+    answers: Dict[str, str]
+    # 프론트엔드가 start 응답에서 받은 ctx를 그대로 전달 (서버리스용)
+    ctx: Optional[Dict[str, Any]] = None
 
 
 class FinalizeRequest(BaseModel):
     session_id: str
     accepted_improvement_ids: List[int]
     user_note: Optional[str] = None
+    # 프론트엔드가 answer 응답에서 받은 ctx를 그대로 전달 (서버리스용)
+    ctx: Optional[Dict[str, Any]] = None
 
 
 # ── 헬퍼 ────────────────────────────────────────────────────────────────────
 
-def _get_or_create_session(db: DBSession, session_id: str) -> SessionModel:
-    s = db.get(SessionModel, session_id)
-    if s is None:
-        s = SessionModel(
-            session_id=session_id,
-            user_input_mode="text",
-            status="in_progress",
-            conversation_stage="init",
-            conversation_context={},
-        )
-        db.add(s)
+def _try_save_session(db: DBSession, session_id: str, stage: str, ctx: dict, status: str, classification: str | None = None) -> None:
+    """DB 저장 시도 — 실패해도 API 흐름에 영향 없음 (서버리스 환경 대응)."""
+    try:
+        s = db.get(SessionModel, session_id)
+        if s is None:
+            s = SessionModel(
+                session_id=session_id,
+                user_input_mode="text",
+                status=status,
+                conversation_stage=stage,
+                conversation_context=ctx,
+            )
+            if classification:
+                s.final_classification = classification
+            db.add(s)
+        else:
+            s.conversation_stage = stage
+            s.conversation_context = ctx
+            s.status = status
+            if classification:
+                s.final_classification = classification
+            db.add(s)
         db.commit()
-        db.refresh(s)
-    return s
+    except Exception as e:
+        print(f"[Session] DB 저장 실패 (무시됨): {e}")
 
 
-def _save_message(db: DBSession, session_id: str, role: str, content: str) -> None:
-    db.add(MessageModel(
-        message_id=str(uuid.uuid4()),
-        session_id=session_id,
-        role=role,
-        content=content,
-    ))
-    db.commit()
+def _try_save_message(db: DBSession, session_id: str, role: str, content: str) -> None:
+    """메시지 저장 시도 — 실패해도 무시."""
+    try:
+        db.add(MessageModel(
+            message_id=str(uuid.uuid4()),
+            session_id=session_id,
+            role=role,
+            content=content,
+        ))
+        db.commit()
+    except Exception as e:
+        print(f"[Message] DB 저장 실패 (무시됨): {e}")
+
+
+def _get_ctx_from_db(db: DBSession, session_id: str, expected_stage: str) -> dict:
+    """DB에서 컨텍스트를 조회합니다."""
+    session = db.get(SessionModel, session_id)
+    if not session or session.conversation_stage != expected_stage:
+        raise HTTPException(status_code=400, detail="잘못된 세션 상태입니다.")
+    return session.conversation_context or {}
 
 
 def _merge_attachment_text(db: DBSession, session_id: str, message: str, attachment_ids: list[str] | None) -> str:
     if not attachment_ids:
         return message
-    from app.storage.models import Attachment as AttachmentModel
-    parts = [message]
-    for att_id in attachment_ids:
-        att = db.get(AttachmentModel, att_id)
-        if att and att.extracted_text:
-            parts.append(f"\n[첨부: {att.filename}]\n{att.extracted_text[:2000]}")
-    return "\n".join(parts)
+    try:
+        from app.storage.models import Attachment as AttachmentModel
+        parts = [message]
+        for att_id in attachment_ids:
+            att = db.get(AttachmentModel, att_id)
+            if att and att.extracted_text:
+                parts.append(f"\n[첨부: {att.filename}]\n{att.extracted_text[:2000]}")
+        return "\n".join(parts)
+    except Exception:
+        return message
 
 
 # ── TURN 1: 분류 + 질문 생성 ────────────────────────────────────────────────
@@ -112,10 +145,9 @@ def _merge_attachment_text(db: DBSession, session_id: str, message: str, attachm
 async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db)):
     """초기 메시지를 분류하고 명확화 질문을 반환합니다."""
     session_id = req.session_id or str(uuid.uuid4())
-    session = _get_or_create_session(db, session_id)
 
     full_message = _merge_attachment_text(db, session_id, req.message, req.attachment_ids)
-    _save_message(db, session_id, "user", req.message)
+    _try_save_message(db, session_id, "user", req.message)
 
     # 분류
     routing = _router_agent.route_message(full_message)
@@ -123,7 +155,6 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
     # 명확화 질문 생성
     questions = _questioner.generate(full_message, routing.classification, n=4)
 
-    # 컨텍스트 저장
     ctx = {
         "stage": "questioning",
         "initial_message": full_message,
@@ -132,20 +163,10 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
         "confidence": routing.confidence,
         "questions": questions,
     }
-    session.conversation_stage = "questioning"
-    session.conversation_context = ctx
-    session.final_classification = routing.classification
-    session.status = "classified"
-    db.add(session)
-    db.commit()
 
-    # AI 응답 저장
-    ai_msg = (
-        f"[{routing.classification}] 유형으로 분류되었습니다 (신뢰도 {routing.confidence*100:.0f}%).\n"
-        f"담당 부처: {routing.responsible_dept}\n\n"
-        "제안서를 더 잘 작성하기 위해 몇 가지 여쭤보겠습니다."
-    )
-    _save_message(db, session_id, "assistant", ai_msg)
+    _try_save_session(db, session_id, "questioning", ctx, "classified", routing.classification)
+    _try_save_message(db, session_id, "assistant",
+        f"[{routing.classification}] 분류됨. 담당: {routing.responsible_dept}")
 
     return {
         "session_id": session_id,
@@ -154,6 +175,8 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
         "responsible_dept": routing.responsible_dept,
         "confidence": routing.confidence,
         "questions": questions,
+        # 서버리스용: 프론트엔드가 다음 요청에 그대로 전달
+        "ctx": ctx,
     }
 
 
@@ -162,19 +185,19 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
 @router.post("/conversation/answer")
 async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db)):
     """사용자 답변을 처리하고 초안 제안서 + 개선안을 반환합니다."""
-    session = db.get(SessionModel, req.session_id)
-    if not session or session.conversation_stage != "questioning":
-        raise HTTPException(status_code=400, detail="잘못된 세션 상태입니다.")
+    # 컨텍스트 우선순위: 요청 페이로드 > DB
+    if req.ctx and req.ctx.get("stage") == "questioning":
+        ctx = req.ctx
+    else:
+        ctx = _get_ctx_from_db(db, req.session_id, "questioning")
 
-    ctx = session.conversation_context or {}
     questions: list[str] = ctx.get("questions", [])
 
-    # 답변 텍스트 합산
     answers_text = "\n".join(
         f"Q{int(k)+1}. {questions[int(k)] if int(k) < len(questions) else ''}  \nA. {v}"
         for k, v in sorted(req.answers.items(), key=lambda x: int(x[0]))
     )
-    _save_message(db, req.session_id, "user", answers_text)
+    _try_save_message(db, req.session_id, "user", answers_text)
 
     combined_message = ctx["initial_message"] + "\n\n[추가 정보]\n" + answers_text
     classification = ctx["classification"]
@@ -190,7 +213,6 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
     # 초안 제안서 생성
     draft_proposal = _structurer.generate_proposal(combined_message, prob, responsible_dept)
     draft_dict = draft_proposal.model_dump()
-    # 검색된 법령명을 related_laws에 병합
     law_titles = [l.get("title", "") for l in laws if l.get("title")]
     existing = draft_dict.get("related_laws", [])
     draft_dict["related_laws"] = list(dict.fromkeys(existing + law_titles))[:8]
@@ -199,8 +221,8 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
     improvements = _improver.suggest(classification, draft_dict, answers_text, n=4)
     improvements_data = [imp.model_dump() for imp in improvements]
 
-    # 컨텍스트 업데이트
-    ctx.update({
+    new_ctx = {
+        **ctx,
         "stage": "improving",
         "user_answers": answers_text,
         "combined_message": combined_message,
@@ -209,15 +231,11 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
         "similar_cases": cases,
         "draft_proposal": draft_dict,
         "improvements": improvements_data,
-    })
-    session.conversation_stage = "improving"
-    session.conversation_context = ctx
-    session.status = "structured"
-    db.add(session)
-    db.commit()
+    }
 
-    ai_msg = f"초안 제안서를 작성했습니다: 『{draft_dict['title']}』\n통과 확률을 높이기 위한 개선안 {len(improvements)}가지를 확인해 주세요."
-    _save_message(db, req.session_id, "assistant", ai_msg)
+    _try_save_session(db, req.session_id, "improving", new_ctx, "structured")
+    _try_save_message(db, req.session_id, "assistant",
+        f"초안 제안서 작성 완료: 『{draft_dict['title']}』")
 
     return {
         "session_id": req.session_id,
@@ -227,6 +245,8 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
         "improvements": improvements_data,
         "related_laws": laws[:5],
         "similar_cases": cases,
+        # 서버리스용
+        "ctx": new_ctx,
     }
 
 
@@ -235,25 +255,25 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
 @router.post("/conversation/finalize")
 async def conversation_finalize(req: FinalizeRequest, db: DBSession = Depends(get_db)):
     """수락된 개선안을 반영한 최종 제안서를 생성하고 DOCX 파일을 제공합니다."""
-    session = db.get(SessionModel, req.session_id)
-    if not session or session.conversation_stage != "improving":
-        raise HTTPException(status_code=400, detail="잘못된 세션 상태입니다.")
+    # 컨텍스트 우선순위: 요청 페이로드 > DB
+    if req.ctx and req.ctx.get("stage") == "improving":
+        ctx = req.ctx
+    else:
+        ctx = _get_ctx_from_db(db, req.session_id, "improving")
 
-    ctx = session.conversation_context or {}
     classification = ctx["classification"]
     draft_proposal = ctx["draft_proposal"]
     improvements_data = ctx.get("improvements", [])
     user_answers = ctx.get("user_answers", "")
 
-    # 수락된 개선안 객체 복원
     accepted: list[Improvement] = [
         Improvement(**imp)
         for imp in improvements_data
         if imp["id"] in req.accepted_improvement_ids
     ]
 
-    user_note_msg = f"수락한 개선안: {req.accepted_improvement_ids}, 메모: {req.user_note or '없음'}"
-    _save_message(db, req.session_id, "user", user_note_msg)
+    _try_save_message(db, req.session_id, "user",
+        f"수락한 개선안: {req.accepted_improvement_ids}")
 
     # 최종 제안서 재작성
     final_proposal = _improver.refine_proposal(
@@ -261,7 +281,7 @@ async def conversation_finalize(req: FinalizeRequest, db: DBSession = Depends(ge
     )
 
     # 타당성 검토 + 시각화
-    from app.schemas.proposal import PolicyProposal, ProposalReview
+    from app.schemas.proposal import PolicyProposal
     proposal_obj = PolicyProposal(**final_proposal)
     review = _reviewer.review(proposal_obj)
     similar_cases = ctx.get("similar_cases", [])
@@ -275,51 +295,43 @@ async def conversation_finalize(req: FinalizeRequest, db: DBSession = Depends(ge
     }
     docx_path = generate_docx(final_proposal, classification, analysis_dict, req.session_id)
 
-    # DB 저장
-    proposal_id = str(uuid.uuid4())
-    db_proposal = StructuredProposalModel(
-        proposal_id=proposal_id,
-        session_id=req.session_id,
-        title=final_proposal.get("title", ""),
-        background=final_proposal.get("background", ""),
-        core_requests=final_proposal.get("core_requests", ""),
-        expected_effects=final_proposal.get("expected_effects", ""),
-        responsible_dept=final_proposal.get("responsible_dept", ""),
-        related_laws=final_proposal.get("related_laws", []),
-    )
-    db.add(db_proposal)
-    db.flush()
+    # DB 저장 (실패해도 무시)
+    try:
+        proposal_id = str(uuid.uuid4())
+        db_proposal = StructuredProposalModel(
+            proposal_id=proposal_id,
+            session_id=req.session_id,
+            title=final_proposal.get("title", ""),
+            background=final_proposal.get("background", ""),
+            core_requests=final_proposal.get("core_requests", ""),
+            expected_effects=final_proposal.get("expected_effects", ""),
+            responsible_dept=final_proposal.get("responsible_dept", ""),
+            related_laws=final_proposal.get("related_laws", []),
+        )
+        db.add(db_proposal)
+        db.flush()
+        db.add(AnalysisResultModel(
+            analysis_id=str(uuid.uuid4()),
+            proposal_id=proposal_id,
+            similar_cases=similar_cases,
+            pass_probability=visual.pass_probability,
+            expected_duration_days=visual.expected_duration_days,
+            feasibility_score=visual.feasibility_score,
+            visualization_data=visual.chart_data,
+        ))
+        db.commit()
+    except Exception as e:
+        print(f"[Finalize] DB 저장 실패 (무시됨): {e}")
 
-    db.add(AnalysisResultModel(
-        analysis_id=str(uuid.uuid4()),
-        proposal_id=proposal_id,
-        similar_cases=similar_cases,
-        pass_probability=visual.pass_probability,
-        expected_duration_days=visual.expected_duration_days,
-        feasibility_score=visual.feasibility_score,
-        visualization_data=visual.chart_data,
-    ))
-
-    ctx.update({
+    final_ctx = {
+        **ctx,
         "stage": "complete",
         "final_proposal": final_proposal,
         "review": review.model_dump(),
         "visual": analysis_dict,
         "docx_filename": docx_path.name,
-    })
-    session.conversation_stage = "complete"
-    session.conversation_context = ctx
-    session.status = "completed"
-    db.add(session)
-    db.commit()
-
-    ai_msg = (
-        f"최종 제안서 『{final_proposal.get('title')}』 완성!\n"
-        f"실현 가능성 {visual.feasibility_score*100:.0f}% | "
-        f"통과 예상 확률 {visual.pass_probability*100:.0f}% | "
-        f"예상 처리 기간 {visual.expected_duration_days}일"
-    )
-    _save_message(db, req.session_id, "assistant", ai_msg)
+    }
+    _try_save_session(db, req.session_id, "complete", final_ctx, "completed")
 
     return {
         "session_id": req.session_id,
@@ -331,6 +343,7 @@ async def conversation_finalize(req: FinalizeRequest, db: DBSession = Depends(ge
         "similar_cases": similar_cases,
         "download_url": f"/api/session/{req.session_id}/download/docx",
         "docx_filename": docx_path.name,
+        "ctx": final_ctx,
     }
 
 
@@ -339,16 +352,27 @@ async def conversation_finalize(req: FinalizeRequest, db: DBSession = Depends(ge
 @router.get("/session/{session_id}/download/docx")
 async def download_docx(session_id: str, db: DBSession = Depends(get_db)):
     """생성된 DOCX 파일 다운로드."""
-    session = db.get(SessionModel, session_id)
-    if not session or session.conversation_stage != "complete":
-        raise HTTPException(status_code=404, detail="완성된 문서가 없습니다.")
+    from app.utils.doc_generator import DOCS_DIR
 
-    ctx = session.conversation_context or {}
-    docx_filename = ctx.get("docx_filename")
+    # DOCX 파일명을 DB 또는 파일시스템에서 찾기
+    docx_filename = None
+    try:
+        session = db.get(SessionModel, session_id)
+        if session and session.conversation_context:
+            docx_filename = session.conversation_context.get("docx_filename")
+    except Exception:
+        pass
+
+    # DB에서 못 찾으면 파일시스템에서 패턴 검색
+    if not docx_filename:
+        prefix = session_id[:8]
+        matches = list(DOCS_DIR.glob(f"{prefix}_*.docx"))
+        if matches:
+            docx_filename = matches[0].name
+
     if not docx_filename:
         raise HTTPException(status_code=404, detail="문서 파일을 찾을 수 없습니다.")
 
-    from app.utils.doc_generator import DOCS_DIR
     file_path = DOCS_DIR / docx_filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="문서 파일이 서버에 없습니다.")
@@ -360,12 +384,15 @@ async def download_docx(session_id: str, db: DBSession = Depends(get_db)):
     )
 
 
-# ── 대화 재개 (페이지 새로고침 시) ──────────────────────────────────────────
+# ── 대화 상태 조회 ────────────────────────────────────────────────────────────
 
 @router.get("/conversation/{session_id}/state")
 async def get_conversation_state(session_id: str, db: DBSession = Depends(get_db)):
-    """현재 대화 단계 상태 조회 (프론트엔드 복원용)."""
-    session = db.get(SessionModel, session_id)
+    try:
+        session = db.get(SessionModel, session_id)
+    except Exception:
+        session = None
+
     if not session:
         raise HTTPException(status_code=404, detail="세션 없음")
 
@@ -380,6 +407,7 @@ async def get_conversation_state(session_id: str, db: DBSession = Depends(get_db
             "improvements": ctx.get("improvements", []),
             "final_proposal": ctx.get("final_proposal"),
             "analysis": ctx.get("visual"),
-            "download_url": f"/api/session/{session_id}/download/docx" if session.conversation_stage == "complete" else None,
+            "download_url": f"/api/session/{session_id}/download/docx"
+                if session.conversation_stage == "complete" else None,
         }
     }
