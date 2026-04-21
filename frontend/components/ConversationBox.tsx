@@ -130,6 +130,17 @@ export default function ConversationBox() {
   const [completeData, setCompleteData] = useState<CompleteState | null>(null)
   const [showDetailModal, setShowDetailModal] = useState(false)
 
+  // 클러스터 정보 — questioning 이후 단계에서도 유지
+  const [clusterInfo, setClusterInfo] = useState<{
+    cluster_id: string
+    topic: string
+    keywords: string[]
+    classification: string
+    cluster_count: number
+    cluster_threshold: number
+    cluster_triggered: boolean
+  } | null>(null)
+
   // Attachments
   const [attachments, setAttachments] = useState<AttachmentPreview[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -154,6 +165,18 @@ export default function ConversationBox() {
       const data: QuestioningState = await res.json()
       setQuestioningData(data)
       setAnswers({})
+      // 클러스터 정보 저장 (이후 단계에서도 표시)
+      if (data.cluster_id && data.classification !== '민원') {
+        setClusterInfo({
+          cluster_id: data.cluster_id,
+          topic: data.topic || '기타',
+          keywords: data.keywords || [],
+          classification: data.classification,
+          cluster_count: data.cluster_count ?? 1,
+          cluster_threshold: data.cluster_threshold ?? 50,
+          cluster_triggered: data.cluster_triggered ?? false,
+        })
+      }
       setStage('questioning')
       persistSession(data.session_id)
       upsertComplaintSummary({
@@ -323,6 +346,7 @@ export default function ConversationBox() {
     setQuestioningData(null)
     setImprovingData(null)
     setCompleteData(null)
+    setClusterInfo(null)
     setAnswers({})
     setAcceptedIds(new Set())
     setUserNote('')
@@ -379,10 +403,12 @@ export default function ConversationBox() {
       {/* ── STAGE: idle ─────────────────────────────────────────────────────── */}
       {stage === 'idle' && (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 space-y-4">
-          <h2 className="text-lg font-semibold text-gray-800">민원·제안·청원을 작성해주세요</h2>
-          <p className="text-sm text-gray-500">
-            불편하신 내용을 자유롭게 작성하시면 AI가 공식 제안서로 완성해드립니다.
-          </p>
+          <div>
+            <h2 className="text-lg font-semibold text-gray-800">민원인지 청원인지 몰라도 됩니다</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              하고 싶은 말을 자유롭게 쓰세요. AI가 자동으로 분류하고, 같은 의견이 모이면 공식 제안서가 만들어집니다.
+            </p>
+          </div>
           <textarea
             value={input}
             onChange={e => setInput(e.target.value)}
@@ -433,7 +459,7 @@ export default function ConversationBox() {
               disabled={isLoading || (!input.trim() && attachments.filter(a => a.id).length === 0)}
               className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isLoading ? '분류 중…' : '민원 접수'}
+              {isLoading ? 'AI 분류 중…' : '제출하기'}
               {!isLoading && <Send size={15} />}
             </button>
           </div>
@@ -622,6 +648,20 @@ export default function ConversationBox() {
             <h2 className="text-xl font-bold">{completeData.final_proposal.title}</h2>
             <p className="text-blue-200 text-sm mt-1">{completeData.final_proposal.responsible_dept}</p>
           </div>
+
+          {/* 클러스터 집계 현황 */}
+          {clusterInfo && (
+            <ClusterStatus
+              clusterId={clusterInfo.cluster_id}
+              topic={clusterInfo.topic}
+              keywords={clusterInfo.keywords}
+              classification={clusterInfo.classification}
+              count={clusterInfo.cluster_count}
+              threshold={clusterInfo.cluster_threshold}
+              triggered={clusterInfo.cluster_triggered}
+              progressPercent={Math.round((clusterInfo.cluster_count / clusterInfo.cluster_threshold) * 100)}
+            />
+          )}
 
           {/* Analysis metrics */}
           <div className="grid grid-cols-3 gap-3">
