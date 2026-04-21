@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session as DBSession
 from typing import Optional
 
 from app.storage.db import get_db
+from app.storage.models import StructuredProposal as StructuredProposalModel, AnalysisResult as AnalysisResultModel
 from app.aggregator.cluster import ClusterManager
 from app.aggregator.trigger import TriggerManager
 
@@ -61,4 +62,35 @@ async def get_pending_triggers(db: DBSession = Depends(get_db)):
     return {
         "total": len(clusters),
         "clusters": [_cluster_to_dict(c) for c in clusters],
+    }
+
+
+@router.get("/proposal/{proposal_id}")
+async def get_proposal(proposal_id: str, db: DBSession = Depends(get_db)):
+    """공식 제안서 상세 조회 (클러스터 또는 개별 세션 제안서)."""
+    proposal = db.get(StructuredProposalModel, proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="제안서를 찾을 수 없습니다.")
+
+    analysis = (
+        db.query(AnalysisResultModel)
+        .filter(AnalysisResultModel.proposal_id == proposal_id)
+        .first()
+    )
+
+    return {
+        "proposal_id": proposal.proposal_id,
+        "title": proposal.title,
+        "background": proposal.background,
+        "core_requests": proposal.core_requests,
+        "expected_effects": proposal.expected_effects,
+        "responsible_dept": proposal.responsible_dept,
+        "related_laws": proposal.related_laws or [],
+        "created_at": proposal.created_at.isoformat() if proposal.created_at else None,
+        "analysis": {
+            "pass_probability": analysis.pass_probability if analysis else None,
+            "expected_duration_days": analysis.expected_duration_days if analysis else None,
+            "feasibility_score": analysis.feasibility_score if analysis else None,
+            "visualization_data": analysis.visualization_data if analysis else None,
+        } if analysis else None,
     }

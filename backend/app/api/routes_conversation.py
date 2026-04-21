@@ -26,6 +26,7 @@ from app.storage.models import (
     StructuredProposal as StructuredProposalModel,
     AnalysisResult as AnalysisResultModel,
     Message as MessageModel,
+    ProposalCluster,
 )
 from app.agents.router import AIRouter
 from app.aggregator.cluster import ClusterManager
@@ -52,6 +53,61 @@ _searcher = LLM2Searcher(persist_dir=settings.chroma_persist_directory)
 _reviewer = LLM3Reviewer()
 _visualizer = LLM4Visualizer()
 _improver = LLMImprover()
+
+
+# ── Agent 2: 클러스터 레벨 공식문서 자동 생성 ────────────────────────────────
+
+def _generate_cluster_proposal(db: DBSession, cluster: ProposalCluster) -> str:
+    """클러스터 집계가 임계치에 도달했을 때 공식 제안서를 자동 생성한다."""
+    synthetic_msg = (
+        f"주제: {cluster.topic}\n"
+        f"키워드: {', '.join(cluster.keywords or [])}\n"
+        f"분류: {cluster.classification}\n"
+        f"{cluster.count}명이 같은 방향의 의견을 제출했습니다. "
+        f"이를 바탕으로 공식 {cluster.classification} 문서를 작성해주세요."
+    )
+
+    prob = _structurer.structure(synthetic_msg, cluster.classification, cluster.responsible_dept)
+    laws = _searcher.search_related_laws(prob, top_k=5)
+    draft = _structurer.generate_proposal(synthetic_msg, prob, cluster.responsible_dept)
+    proposal_dict = draft.model_dump()
+    law_titles = [l.get("title", "") for l in laws if l.get("title")]
+    proposal_dict["related_laws"] = list(dict.fromkeys(
+        proposal_dict.get("related_laws", []) + law_titles
+    ))[:8]
+
+    from app.schemas.proposal import PolicyProposal
+    proposal_obj = PolicyProposal(**proposal_dict)
+    review = _reviewer.review(proposal_obj)
+    visual = _visualizer.visualize(
+        proposal_obj, review, [], cluster.classification,
+        cluster_count=cluster.count,
+    )
+
+    proposal_id = str(uuid.uuid4())
+    db_proposal = StructuredProposalModel(
+        proposal_id=proposal_id,
+        session_id=f"cluster-{cluster.cluster_id}",
+        title=proposal_dict.get("title", f"{cluster.topic} {cluster.classification}"),
+        background=proposal_dict.get("background", ""),
+        core_requests=proposal_dict.get("core_requests", ""),
+        expected_effects=proposal_dict.get("expected_effects", ""),
+        responsible_dept=cluster.responsible_dept,
+        related_laws=proposal_dict.get("related_laws", []),
+    )
+    db.add(db_proposal)
+    db.flush()
+    db.add(AnalysisResultModel(
+        analysis_id=str(uuid.uuid4()),
+        proposal_id=proposal_id,
+        similar_cases=[],
+        pass_probability=visual.pass_probability,
+        expected_duration_days=visual.expected_duration_days,
+        feasibility_score=visual.feasibility_score,
+        visualization_data=visual.chart_data,
+    ))
+    db.commit()
+    return proposal_id
 
 
 # ── 요청/응답 스키마 ─────────────────────────────────────────────────────────
@@ -175,6 +231,18 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
             cluster_count = cluster.count
             cluster_threshold = cluster.threshold
             cluster_triggered = cluster.triggered
+
+            # Agent 2: 임계치 도달 시 인라인으로 공식문서 생성
+            if _trigger_mgr.should_trigger(cluster):
+                try:
+                    new_proposal_id = _generate_cluster_proposal(db, cluster)
+                    cluster.proposal_id = new_proposal_id
+                    db.add(cluster)
+                    _trigger_mgr.mark_triggered(db, cluster)
+                    cluster_triggered = True
+                    print(f"[Agent2] 클러스터 {cluster_id} 공식문서 생성 완료: {new_proposal_id}")
+                except Exception as e:
+                    print(f"[Agent2] 클러스터 공식문서 생성 실패 (무시됨): {e}")
 
             # 세션에 cluster_id 기록
             s = db.get(SessionModel, session_id)
@@ -372,6 +440,19 @@ async def conversation_finalize(req: FinalizeRequest, db: DBSession = Depends(ge
             visualization_data=visual.chart_data,
         ))
         db.commit()
+
+        # 세션이 클러스터에 속하는 경우 아직 proposal 없으면 이 문서를 임시 연결
+        try:
+            session_obj = db.get(SessionModel, req.session_id)
+            if session_obj and session_obj.cluster_id:
+                cluster_obj = db.get(ProposalCluster, session_obj.cluster_id)
+                if cluster_obj and not cluster_obj.proposal_id:
+                    cluster_obj.proposal_id = proposal_id
+                    db.add(cluster_obj)
+                    db.commit()
+        except Exception as ce:
+            print(f"[Finalize] 클러스터 연결 실패 (무시됨): {ce}")
+
     except Exception as e:
         print(f"[Finalize] DB 저장 실패 (무시됨): {e}")
 

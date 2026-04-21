@@ -24,12 +24,17 @@ export default function ClustersPage() {
   const [filter, setFilter] = useState<'전체' | '제안' | '청원'>('전체')
 
   useEffect(() => {
-    const params = filter !== '전체' ? `?classification=${filter}` : ''
-    fetch(`${API_BASE}/api/clusters${params}`)
-      .then(r => r.json())
-      .then(data => setClusters(data.clusters || []))
-      .catch(() => setClusters([]))
-      .finally(() => setLoading(false))
+    const load = () => {
+      const params = filter !== '전체' ? `?classification=${filter}` : ''
+      fetch(`${API_BASE}/api/clusters${params}`)
+        .then(r => r.json())
+        .then(data => setClusters(data.clusters || []))
+        .catch(() => setClusters([]))
+        .finally(() => setLoading(false))
+    }
+    load()
+    const interval = setInterval(load, 30000)
+    return () => clearInterval(interval)
   }, [filter])
 
   return (

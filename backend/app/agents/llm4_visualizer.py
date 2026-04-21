@@ -13,13 +13,16 @@ class LLM4Visualizer:
         review: ProposalReview,
         similar_cases: list[dict],
         classification: str = "민원",
+        cluster_count: int = 0,
     ) -> VisualAnalysis:
         law_count = len(proposal.related_laws)
         feasibility_score = round(
             review.validity_score * 0.8 + min(law_count / 10.0, 1.0) * 0.2,
             3,
         )
-        pass_probability = round(max(0.30, min(0.95, feasibility_score)), 3)
+        # 클러스터 참여 인원 보정: 많은 시민이 참여할수록 최대 +0.15 가산
+        crowd_bonus = min(cluster_count / 1000.0, 0.15) if cluster_count > 0 else 0.0
+        pass_probability = round(max(0.30, min(0.95, feasibility_score + crowd_bonus)), 3)
 
         base_days = CLASSIFICATION_DURATION.get(classification, 120)
         dept = proposal.responsible_dept.lower()

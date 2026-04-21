@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { Send, Mic, MicOff, Download, CheckCircle, Circle, ChevronRight, FileText, Paperclip, X, Image as ImageIcon, Expand } from 'lucide-react'
+import Link from 'next/link'
+import { Send, Mic, MicOff, Download, CheckCircle, Circle, ChevronRight, FileText, Paperclip, X, Image as ImageIcon, Expand, Users } from 'lucide-react'
 import ClusterStatus from './ClusterStatus'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
@@ -748,6 +749,17 @@ export default function ConversationBox() {
               상세 결과 보기
             </button>
           </div>
+
+          {/* 클러스터 집계 현황 바로가기 */}
+          {clusterInfo && (
+            <Link
+              href={`/cluster/${clusterInfo.cluster_id}`}
+              className="w-full flex items-center justify-center gap-2 py-2.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-xl text-sm font-medium hover:bg-blue-100 transition-colors"
+            >
+              <Users size={15} />
+              집계 현황 보기 — 현재 {clusterInfo.cluster_count.toLocaleString()}명 참여 중
+            </Link>
+          )}
 
           <button
             onClick={resetAll}
