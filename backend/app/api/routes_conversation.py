@@ -28,6 +28,8 @@ from app.storage.models import (
     Message as MessageModel,
 )
 from app.agents.router import AIRouter
+from app.aggregator.cluster import ClusterManager
+from app.aggregator.trigger import TriggerManager
 from app.agents.llm_questioner import LLMQuestioner
 from app.agents.llm1_structurer import LLM1Structurer
 from app.agents.llm2_searcher import LLM2Searcher
@@ -42,6 +44,8 @@ router = APIRouter()
 
 # 공유 에이전트 인스턴스
 _router_agent = AIRouter()
+_cluster_mgr = ClusterManager()
+_trigger_mgr = TriggerManager()
 _questioner = LLMQuestioner()
 _structurer = LLM1Structurer()
 _searcher = LLM2Searcher(persist_dir=settings.chroma_persist_directory)
@@ -152,6 +156,44 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
     # 분류
     routing = _router_agent.route_message(full_message)
 
+    # 제안/청원인 경우 클러스터 배정 (Agent 1 집계 로직)
+    cluster_id: str | None = None
+    cluster_count: int = 0
+    cluster_threshold: int = 50
+    cluster_triggered: bool = False
+
+    if routing.classification in ("제안", "청원"):
+        try:
+            cluster = _cluster_mgr.get_or_create_cluster(
+                db,
+                topic=routing.topic,
+                keywords=routing.keywords,
+                classification=routing.classification,
+                responsible_dept=routing.responsible_dept,
+            )
+            cluster_id = cluster.cluster_id
+            cluster_count = cluster.count
+            cluster_threshold = cluster.threshold
+            cluster_triggered = cluster.triggered
+
+            # 세션에 cluster_id 기록
+            s = db.get(SessionModel, session_id)
+            if s is None:
+                s = SessionModel(
+                    session_id=session_id,
+                    user_input_mode="text",
+                    status="classified",
+                    cluster_id=cluster_id,
+                )
+                db.add(s)
+            else:
+                s.cluster_id = cluster_id
+                s.status = "aggregated"
+                db.add(s)
+            db.commit()
+        except Exception as e:
+            print(f"[Cluster] 배정 실패 (무시됨): {e}")
+
     # 명확화 질문 생성
     questions = _questioner.generate(full_message, routing.classification, n=5)
 
@@ -161,6 +203,11 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
         "classification": routing.classification,
         "responsible_dept": routing.responsible_dept,
         "confidence": routing.confidence,
+        "topic": routing.topic,
+        "keywords": routing.keywords,
+        "cluster_id": cluster_id,
+        "cluster_count": cluster_count,
+        "cluster_threshold": cluster_threshold,
         "questions": questions,
     }
 
@@ -174,8 +221,13 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
         "classification": routing.classification,
         "responsible_dept": routing.responsible_dept,
         "confidence": routing.confidence,
+        "topic": routing.topic,
+        "keywords": routing.keywords,
+        "cluster_id": cluster_id,
+        "cluster_count": cluster_count,
+        "cluster_threshold": cluster_threshold,
+        "cluster_triggered": cluster_triggered,
         "questions": questions,
-        # 서버리스용: 프론트엔드가 다음 요청에 그대로 전달
         "ctx": ctx,
     }
 

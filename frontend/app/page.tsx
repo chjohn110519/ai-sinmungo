@@ -24,6 +24,12 @@ export default function Home() {
             >
               관리자
             </Link>
+            <Link
+              href="/clusters"
+              className="rounded-lg px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 transition-colors"
+            >
+              집계 현황
+            </Link>
             <a
               href="#chat"
               className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/20"
@@ -40,33 +46,44 @@ export default function Home() {
           <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
             <div>
               <p className="text-sm uppercase tracking-[0.32em] font-semibold text-blue-100 mb-4">
-                AI 기반 민원 처리
+                단일 창구 시민 참여 플랫폼
               </p>
-              <h2 className="text-5xl font-bold leading-tight tracking-tight sm:text-6xl mb-6">
-                민원과 제안을<br />
-                <span className="text-yellow-300">스마트하게 처리</span>
+              <h2 className="text-5xl font-bold leading-tight tracking-tight sm:text-6xl mb-4">
+                민원인지 청원인지<br />
+                <span className="text-yellow-300">몰라도 됩니다</span>
               </h2>
-              <p className="text-lg text-blue-100 mb-8 max-w-xl">
-                텍스트나 음성으로 민원을 접수하면, AI가 자동으로 분류하고 관련 법령을 검색해 정책 제안서까지 만들어드립니다.
+              <p className="text-lg text-blue-100 mb-3 max-w-xl">
+                하나의 창구에 자유롭게 말씀하시면 AI가 자동으로 분류하고,
+                같은 목소리가 모일수록 더 설득력 있는 공식 제안서로 만들어드립니다.
               </p>
-              <button className="rounded-xl bg-white px-8 py-3 font-semibold text-blue-600 hover:bg-blue-50 transition-colors shadow-lg">
+              <div className="flex flex-wrap gap-2 mb-8">
+                {['민원', '제안', '청원'].map(t => (
+                  <span key={t} className="px-3 py-1 rounded-full bg-white/15 text-white text-sm font-medium border border-white/30">
+                    {t}
+                  </span>
+                ))}
+                <span className="px-3 py-1 rounded-full bg-yellow-400/20 text-yellow-200 text-sm font-medium border border-yellow-400/30">
+                  → AI가 자동 분류
+                </span>
+              </div>
+              <a href="#chat" className="inline-block rounded-xl bg-white px-8 py-3 font-semibold text-blue-600 hover:bg-blue-50 transition-colors shadow-lg">
                 지금 시작하기
-              </button>
+              </a>
             </div>
             <div className="hidden lg:block">
               <div className="rounded-2xl bg-white/10 backdrop-blur p-8 border border-white/20">
                 <div className="space-y-4">
                   <div className="rounded-xl bg-white/10 p-4 border border-white/20">
-                    <p className="text-sm text-white font-semibold">180개의 기관</p>
-                    <p className="text-2xl font-bold text-yellow-300">신뢰하고 있습니다</p>
+                    <p className="text-sm text-white font-semibold">같은 방향의 제안이 모이면</p>
+                    <p className="text-2xl font-bold text-yellow-300">설득력이 높아집니다</p>
                   </div>
                   <div className="rounded-xl bg-white/10 p-4 border border-white/20">
-                    <p className="text-sm text-white font-semibold">10,014건의 아이디어</p>
-                    <p className="text-2xl font-bold text-yellow-300">처리 완료</p>
+                    <p className="text-sm text-white font-semibold">분류·청원·민원 구분 없이</p>
+                    <p className="text-2xl font-bold text-yellow-300">하나의 창구로</p>
                   </div>
                   <div className="rounded-xl bg-white/10 p-4 border border-white/20">
-                    <p className="text-sm text-white font-semibold">3,762명의 멘토</p>
-                    <p className="text-2xl font-bold text-yellow-300">지원 중</p>
+                    <p className="text-sm text-white font-semibold">집계 후 AI가 자동으로</p>
+                    <p className="text-2xl font-bold text-yellow-300">공식 문서를 생성합니다</p>
                   </div>
                 </div>
               </div>
@@ -82,10 +99,10 @@ export default function Home() {
           </div>
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
             {[
-              { icon: '📝', title: '자동 분류', description: '텍스트/음성 입력을 실시간으로 분류합니다.' },
-              { icon: '🔍', title: '법령 검색', description: '관련 법령과 유사 사례를 RAG로 제안합니다.' },
-              { icon: '📋', title: '정책 제안서', description: '법안 형식의 구조화된 제안서를 생성합니다.' },
-              { icon: '📊', title: '타당성 분석', description: '실현 가능성과 추진 기간을 예측합니다.' },
+              { icon: '🚪', title: '단일 창구', description: '민원·제안·청원을 구분 없이 하나의 창구에서 접수합니다.' },
+              { icon: '🔗', title: '자동 집계', description: '같은 방향의 제안을 자동으로 묶어 목소리를 모읍니다.' },
+              { icon: '📋', title: '공식 문서화', description: '집계된 제안을 법안 형식의 공식 제안서로 자동 생성합니다.' },
+              { icon: '📊', title: '통과 예측', description: '누적 데이터 기반으로 통과 확률과 소요기간을 예측합니다.' },
             ].map((card) => (
               <div
                 key={card.title}
@@ -116,20 +133,21 @@ export default function Home() {
           <div className="space-y-6">
             {/* 안내 카드 */}
             <div className="rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 p-6 shadow-md">
-              <h4 className="text-lg font-bold text-blue-900 mb-3">이런 내용을 입력하세요</h4>
+              <h4 className="text-lg font-bold text-blue-900 mb-3">뭐든 자유롭게 말씀하세요</h4>
               <ul className="space-y-2 text-sm text-blue-800">
-                <li>• 개선되어야 할 정책이나 제도</li>
-                <li>• 일상 속 불편한 점</li>
-                <li>• 새로운 아이디어나 제안</li>
-                <li>• 현장의 목소리</li>
+                <li>• "○○ 제도가 불합리합니다" (민원)</li>
+                <li>• "청년 주거 지원을 이렇게 바꾸면 어떨까요" (제안)</li>
+                <li>• "○○법을 개정해야 합니다" (청원)</li>
+                <li>• AI가 자동으로 분류하고 집계합니다</li>
               </ul>
             </div>
 
-            {/* 특징 카드 */}
+            {/* 집계 특징 카드 */}
             <div className="rounded-2xl bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200 p-6 shadow-md">
-              <h4 className="text-lg font-bold text-amber-900 mb-3">⚡ 빠른 처리</h4>
+              <h4 className="text-lg font-bold text-amber-900 mb-3">🔗 함께할수록 강해집니다</h4>
               <p className="text-sm text-amber-800">
-                AI가 즉시 당신의 제안을 분석하고 관련 법령까지 검색합니다.
+                같은 방향의 의견이 모일수록 집계 카운트가 올라가고,
+                목표에 도달하면 AI가 공식 제안서를 자동 생성합니다.
               </p>
             </div>
 
@@ -150,14 +168,14 @@ export default function Home() {
         <section className="mb-16">
           <div className="mb-12 text-center">
             <h2 className="text-4xl font-bold text-gray-900 mb-4">작동 방식</h2>
-            <p className="text-lg text-gray-600">4단계로 완성되는 AI 기반 민원 처리</p>
+            <p className="text-lg text-gray-600">집단 목소리가 공식 문서가 되는 과정</p>
           </div>
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
             {[
-              { num: '1', title: '입력', desc: '텍스트 또는 음성으로 민원 입력' },
-              { num: '2', title: '분류', desc: 'AI가 자동으로 민원 유형 분류' },
-              { num: '3', title: '분석', desc: '관련 법령 검색 및 사례 제시' },
-              { num: '4', title: '제안', desc: '정책 제안서 자동 생성' },
+              { num: '1', title: '자유 입력', desc: '민원·제안·청원 구분 없이 자유롭게 입력' },
+              { num: '2', title: 'AI 분류·집계', desc: 'AI가 자동 분류하고 같은 방향의 의견을 하나로 묶음' },
+              { num: '3', title: '공식 문서화', desc: '집계가 쌓이면 AI가 법안 수준 제안서 자동 생성' },
+              { num: '4', title: '통과 예측', desc: '누적 데이터 기반 통과 확률·소요기간 제공' },
             ].map((step) => (
               <div key={step.num} className="relative">
                 <div className="rounded-2xl border border-blue-200 bg-blue-50 p-6 text-center">

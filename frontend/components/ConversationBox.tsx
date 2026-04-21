@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react'
 import { Send, Mic, MicOff, Download, CheckCircle, Circle, ChevronRight, FileText, Paperclip, X, Image as ImageIcon, Expand } from 'lucide-react'
+import ClusterStatus from './ClusterStatus'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 const STORAGE_KEY = 'complaint_sessions'
@@ -17,6 +18,12 @@ interface QuestioningState {
   responsible_dept: string
   confidence: number
   questions: string[]
+  topic?: string
+  keywords?: string[]
+  cluster_id?: string | null
+  cluster_count?: number
+  cluster_threshold?: number
+  cluster_triggered?: boolean
   ctx?: Ctx
 }
 
@@ -449,6 +456,20 @@ export default function ConversationBox() {
               {questioningData.responsible_dept} · 신뢰도 {Math.round(questioningData.confidence * 100)}%
             </span>
           </div>
+
+          {/* 집계 현황 (제안/청원인 경우) */}
+          {questioningData.cluster_id && questioningData.classification !== '민원' && (
+            <ClusterStatus
+              clusterId={questioningData.cluster_id}
+              topic={questioningData.topic || '기타'}
+              keywords={questioningData.keywords || []}
+              classification={questioningData.classification}
+              count={questioningData.cluster_count ?? 1}
+              threshold={questioningData.cluster_threshold ?? 50}
+              triggered={questioningData.cluster_triggered ?? false}
+              progressPercent={Math.round(((questioningData.cluster_count ?? 1) / (questioningData.cluster_threshold ?? 50)) * 100)}
+            />
+          )}
 
           <div>
             <h2 className="text-base font-semibold text-gray-800 mb-1">

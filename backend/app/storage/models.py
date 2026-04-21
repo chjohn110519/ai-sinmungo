@@ -1,10 +1,27 @@
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import Column, String, Text, Float, Integer, DateTime, JSON, ForeignKey, Enum
+from sqlalchemy import Column, String, Text, Float, Integer, DateTime, JSON, ForeignKey, Enum, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
 Base = declarative_base()
+
+
+class ProposalCluster(Base):
+    """Agent 1이 동일 방향 제안을 집계하는 클러스터."""
+    __tablename__ = "proposal_clusters"
+
+    cluster_id = Column(String, primary_key=True)
+    topic = Column(String, nullable=False)               # 대주제 (교통, 환경, ...)
+    keywords = Column(JSON, nullable=False, default=list) # 핵심 키워드 목록
+    responsible_dept = Column(String, nullable=False)
+    classification = Column(Enum("제안", "청원"), nullable=False)
+    count = Column(Integer, default=1)                   # 집계된 입력 수
+    threshold = Column(Integer, default=50)              # Agent 2 트리거 임계치
+    triggered = Column(Boolean, default=False)           # Agent 2 트리거 여부
+    proposal_id = Column(String, ForeignKey("structured_proposals.proposal_id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class Session(Base):
@@ -14,10 +31,10 @@ class Session(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     user_input_mode = Column(Enum("text", "voice"), default="text")
     final_classification = Column(Enum("민원", "제안", "청원"), nullable=True)
-    status = Column(Enum("in_progress", "classified", "structured", "completed", "failed"), default="in_progress")
-    # 다단계 대화 상태 저장 (questioning / improving / complete)
+    status = Column(Enum("in_progress", "classified", "aggregated", "structured", "completed", "failed"), default="in_progress")
+    cluster_id = Column(String, ForeignKey("proposal_clusters.cluster_id"), nullable=True)
     conversation_stage = Column(String, nullable=True, default="init")
-    conversation_context = Column(JSON, nullable=True)  # 단계별 축적 컨텍스트
+    conversation_context = Column(JSON, nullable=True)
 
 
 class Message(Base):
@@ -96,4 +113,6 @@ class LegalDocument(Base):
 Session.messages = relationship("Message", order_by=Message.created_at, back_populates="session")
 Session.proposal = relationship("StructuredProposal", uselist=False, back_populates="session")
 Session.attachments = relationship("Attachment", order_by=Attachment.created_at, back_populates="session")
+Session.cluster = relationship("ProposalCluster", foreign_keys=[Session.cluster_id])
 StructuredProposal.analysis = relationship("AnalysisResult", uselist=False, back_populates="proposal")
+ProposalCluster.sessions = relationship("Session", foreign_keys=[Session.cluster_id])

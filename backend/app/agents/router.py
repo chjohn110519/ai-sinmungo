@@ -20,11 +20,20 @@ except ImportError:
 
 SYSTEM_PROMPT = "당신은 국민신문고 민원 분류 전문가입니다."
 
-CLASSIFY_PROMPT = """사용자 입력을 분석하여 민원/제안/청원 중 하나로 정확히 분류하세요.
+CLASSIFY_PROMPT = """사용자 입력을 분석하여 아래 정보를 추출하세요.
 
+분류 기준:
 - 민원: 행정기관에 특정 행위를 요구하거나 불편함을 신고하는 내용
 - 제안: 정책이나 제도의 개선 또는 새로운 아이디어를 제안하는 내용
 - 청원: 법률·제도의 제정/개폐 또는 공공 문제 해결을 국가에 청원하는 내용
+
+추출 항목:
+- classification: 민원/제안/청원 중 하나
+- confidence: 분류 확신도 (0.0~1.0)
+- responsible_dept: 관할 부처명 (예: 국토교통부, 환경부, 행정안전부)
+- reasoning: 분류 이유 한 문장
+- topic: 대주제 한 단어 (교통, 환경, 주거, 복지, 교육, 의료, 경제, 노동, 안전, 기타 중 선택)
+- keywords: 핵심 키워드 3~5개 (리스트)
 
 사용자 입력: {message}"""
 
@@ -116,15 +125,20 @@ class AIRouter:
             confidence=0.55,
             responsible_dept="행정안전부",
             reasoning="모델 클라이언트를 초기화할 수 없어 기본 분류를 반환합니다.",
+            topic="기타",
+            keywords=[],
         )
 
     def _fallback_parse(self, text: str) -> RoutingResult:
         """Instructor 미사용 시 텍스트 파싱 폴백"""
+        import json as _json
         result = {
             "classification": "민원",
             "confidence": 0.55,
             "responsible_dept": "행정안전부",
             "reasoning": text,
+            "topic": "기타",
+            "keywords": [],
         }
         for line in text.splitlines():
             line = line.strip()
@@ -144,4 +158,13 @@ class AIRouter:
                 result["responsible_dept"] = val
             elif key == "reasoning":
                 result["reasoning"] = val
+            elif key == "topic":
+                result["topic"] = val
+            elif key == "keywords":
+                try:
+                    kws = _json.loads(val)
+                    if isinstance(kws, list):
+                        result["keywords"] = kws
+                except Exception:
+                    result["keywords"] = [k.strip() for k in val.strip("[]").split(",") if k.strip()]
         return RoutingResult(**result)

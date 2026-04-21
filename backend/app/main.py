@@ -8,6 +8,7 @@ from app.api.routes_admin import router as admin_router
 from app.api.routes_bill import router as bill_router
 from app.api.routes_upload import router as upload_router
 from app.api.routes_conversation import router as conversation_router
+from app.api.routes_cluster import router as cluster_router
 from app.config import settings
 from app.storage.db import init_db
 
@@ -49,6 +50,7 @@ app.include_router(admin_router, prefix="/api", tags=["admin"])
 app.include_router(bill_router, prefix="/api", tags=["bill"])
 app.include_router(upload_router, prefix="/api", tags=["upload"])
 app.include_router(conversation_router, prefix="/api", tags=["conversation"])
+app.include_router(cluster_router, prefix="/api", tags=["cluster"])
 
 
 @app.get("/")
