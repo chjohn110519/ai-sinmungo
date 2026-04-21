@@ -97,7 +97,15 @@ class AIRouter:
                         max_tokens=512,
                         temperature=0.2,
                     )
-                    return self._fallback_parse(response.choices[0].message.content)
+                    result = self._fallback_parse(response.choices[0].message.content)
+                    # fallback parse가 기본값을 반환하면 키워드 분류로 보완
+                    if result.confidence <= 0.55:
+                        kw_result = _keyword_classify(message)
+                        if kw_result.classification != "민원":
+                            result.classification = kw_result.classification
+                            result.topic = kw_result.topic
+                            result.keywords = result.keywords or kw_result.keywords
+                    return result
             except Exception as exc:
                 print(f"OpenAI 라우터 오류: {exc}")
 
@@ -116,18 +124,18 @@ class AIRouter:
                         max_tokens=512,
                         messages=[{"role": "user", "content": prompt}],
                     )
-                    return self._fallback_parse(response.content[0].text)
+                    result = self._fallback_parse(response.content[0].text)
+                    if result.confidence <= 0.55:
+                        kw_result = _keyword_classify(message)
+                        if kw_result.classification != "민원":
+                            result.classification = kw_result.classification
+                            result.topic = kw_result.topic
+                            result.keywords = result.keywords or kw_result.keywords
+                    return result
             except Exception as exc:
                 print(f"Anthropic 라우터 오류: {exc}")
 
-        return RoutingResult(
-            classification="민원",
-            confidence=0.55,
-            responsible_dept="행정안전부",
-            reasoning="모델 클라이언트를 초기화할 수 없어 기본 분류를 반환합니다.",
-            topic="기타",
-            keywords=[],
-        )
+        return _keyword_classify(message)
 
     def _fallback_parse(self, text: str) -> RoutingResult:
         """Instructor 미사용 시 텍스트 파싱 폴백"""
@@ -168,3 +176,67 @@ class AIRouter:
                 except Exception:
                     result["keywords"] = [k.strip() for k in val.strip("[]").split(",") if k.strip()]
         return RoutingResult(**result)
+
+
+# ── 키워드 기반 분류 (LLM 실패 시 fallback) ─────────────────────────────────
+
+_PETITION_KW = [
+    "청원", "법 개정", "법률 개정", "입법", "제정", "폐지", "법안", "조항 삭제",
+    "헌법", "개헌", "법령", "규정 개정", "국회",
+]
+_PROPOSAL_KW = [
+    "제안", "제안합니다", "개선", "도입", "확대", "강화", "신설", "개편",
+    "바꿔", "바꾸", "해주면", "했으면", "필요합니다", "방안", "정책",
+    "지원 확대", "지원해", "늘려", "늘렸으면", "만들어", "시행",
+]
+
+_TOPIC_KW: dict[str, tuple[list[str], str]] = {
+    "교통": (["도로", "버스", "지하철", "주차", "신호", "교통", "자전거", "횡단보도", "택시"], "국토교통부"),
+    "환경": (["환경", "쓰레기", "미세먼지", "공기", "소음", "하천", "오염", "재활용", "탄소"], "환경부"),
+    "주거": (["주택", "아파트", "임대", "전세", "주거", "건물", "빈집", "층간"], "국토교통부"),
+    "복지": (["복지", "장애", "노인", "아동", "청소년", "돌봄", "요양", "어르신"], "보건복지부"),
+    "교육": (["교육", "학교", "학원", "교사", "급식", "입시", "대학", "학생", "수업"], "교육부"),
+    "의료": (["의료", "병원", "의사", "약", "건강", "보건", "간호", "진료", "치료"], "보건복지부"),
+    "경제": (["경제", "세금", "금융", "중소기업", "창업", "일자리", "물가", "소비"], "기획재정부"),
+    "노동": (["노동", "근로", "임금", "고용", "실업", "직장", "알바", "최저임금"], "고용노동부"),
+    "안전": (["안전", "범죄", "사고", "재난", "소방", "경찰", "화재", "보안"], "행정안전부"),
+}
+
+
+def _keyword_classify(message: str) -> RoutingResult:
+    msg = message
+
+    # 청원 우선 판단
+    for kw in _PETITION_KW:
+        if kw in msg:
+            classification = "청원"
+            break
+    else:
+        # 제안 판단
+        for kw in _PROPOSAL_KW:
+            if kw in msg:
+                classification = "제안"
+                break
+        else:
+            classification = "민원"
+
+    # 주제 및 담당 부처 추출
+    topic = "기타"
+    dept = "행정안전부"
+    keywords: list[str] = []
+    for t, (kws, d) in _TOPIC_KW.items():
+        matched = [kw for kw in kws if kw in msg]
+        if matched:
+            topic = t
+            dept = d
+            keywords = matched[:5]
+            break
+
+    return RoutingResult(
+        classification=classification,
+        confidence=0.60,
+        responsible_dept=dept,
+        reasoning="키워드 기반 분류 (LLM 미응답 시 fallback)",
+        topic=topic,
+        keywords=keywords,
+    )
