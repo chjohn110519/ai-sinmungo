@@ -148,7 +148,7 @@ export default function ClusterPage() {
               <p className="text-sm text-green-700">{cluster.count.toLocaleString()}명의 목소리가 하나의 제안서로 구조화되었습니다.</p>
             </div>
             <Link
-              href={`/result/${cluster.proposal_id}`}
+              href={`/proposal/${cluster.proposal_id}`}
               className="flex-shrink-0 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition-colors"
             >
               제안서 보기

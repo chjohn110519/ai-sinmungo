@@ -23,7 +23,7 @@ interface ProposalData {
   } | null
 }
 
-export default function ResultPage() {
+export default function ProposalPage() {
   const params = useParams()
   const proposalId = params?.proposal_id as string
 
@@ -177,7 +177,6 @@ export default function ResultPage() {
           </div>
         )}
 
-        {/* 하단 CTA */}
         <div className="text-center space-y-3 pt-2">
           <Link
             href="/clusters"
