@@ -1,10 +1,33 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import BrandLogo from '@/components/BrandLogo'
 import ConversationBox from '@/components/ConversationBox'
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+
+interface TrendingKeyword {
+  keyword: string
+  total_count: number
+}
+
 export default function Home() {
+  const [trending, setTrending] = useState<TrendingKeyword[]>([])
+
+  useEffect(() => {
+    const load = () =>
+      fetch(`${API_BASE}/api/clusters/trending-keywords`)
+        .then(r => r.json())
+        .then(d => setTrending(d.trending_keywords || []))
+        .catch(() => {})
+    load()
+    const t = setInterval(load, 30000)
+    return () => clearInterval(t)
+  }, [])
+
+  const maxCount = trending[0]?.total_count || 1
+
   return (
     <main className="min-h-screen bg-gray-50">
       <nav className="sticky top-0 z-40 border-b border-gray-200 bg-white/80 backdrop-blur-sm">
@@ -58,14 +81,35 @@ export default function Home() {
               </p>
             </div>
 
+            {/* 핫 키워드 TOP 5 */}
             <div className="rounded-2xl bg-white border border-gray-200 p-6 shadow-md">
               <div className="flex items-center justify-between mb-4">
-                <h4 className="font-bold text-gray-900">신뢰도</h4>
-                <span className="text-2xl font-bold text-blue-600">98%</span>
+                <h4 className="font-bold text-gray-900">🔥 지금 핫한 키워드</h4>
+                <Link href="/clusters" className="text-xs text-blue-600 hover:underline">전체 보기 →</Link>
               </div>
-              <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-                <div className="h-full w-[98%] bg-gradient-to-r from-blue-500 to-blue-600" />
-              </div>
+              {trending.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-4">아직 집계된 데이터가 없습니다</p>
+              ) : (
+                <div className="space-y-2.5">
+                  {trending.map((item, i) => (
+                    <div key={item.keyword} className="flex items-center gap-3">
+                      <span className="text-xs font-bold text-gray-400 w-4 flex-shrink-0">{i + 1}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-medium text-gray-800 truncate">{item.keyword}</span>
+                          <span className="text-xs text-gray-500 ml-2 flex-shrink-0">{item.total_count}</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-blue-400 to-blue-600"
+                            style={{ width: `${Math.round((item.total_count / maxCount) * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </section>

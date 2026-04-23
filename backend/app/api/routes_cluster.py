@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session as DBSession
 from typing import Optional
 
 from app.storage.db import get_db
-from app.storage.models import StructuredProposal as StructuredProposalModel, AnalysisResult as AnalysisResultModel
+from app.storage.models import ProposalCluster, StructuredProposal as StructuredProposalModel, AnalysisResult as AnalysisResultModel
 from app.aggregator.cluster import ClusterManager
 from app.aggregator.trigger import TriggerManager
 
@@ -52,6 +52,25 @@ async def list_clusters(
     return {
         "total": len(clusters),
         "clusters": [_cluster_to_dict(c) for c in clusters],
+    }
+
+
+@router.get("/clusters/trending-keywords")
+async def get_trending_keywords(
+    limit: int = Query(5, ge=1, le=20),
+    db: DBSession = Depends(get_db),
+):
+    """클러스터 키워드를 count 가중치로 집계한 인기 키워드 TOP N."""
+    clusters = db.query(ProposalCluster).all()
+    keyword_weights: dict[str, int] = {}
+    for c in clusters:
+        for kw in (c.keywords or []):
+            keyword_weights[kw] = keyword_weights.get(kw, 0) + c.count
+    trending = sorted(keyword_weights.items(), key=lambda x: x[1], reverse=True)[:limit]
+    return {
+        "trending_keywords": [
+            {"keyword": kw, "total_count": cnt} for kw, cnt in trending
+        ]
     }
 
 
