@@ -37,9 +37,6 @@ export default function Home() {
             <Link href="/complaints" className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors">
               민원 목록
             </Link>
-            <Link href="/admin" className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors">
-              관리자
-            </Link>
             <Link href="/clusters" className="rounded-lg px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 transition-colors">
               집계 현황
             </Link>
