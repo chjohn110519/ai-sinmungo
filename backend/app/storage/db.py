@@ -30,3 +30,9 @@ def create_tables():
 def init_db():
     """데이터베이스 초기화"""
     create_tables()
+    from app.storage.seed import seed_if_empty
+    db = SessionLocal()
+    try:
+        seed_if_empty(db)
+    finally:
+        db.close()
