@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react'
 import Link from 'next/link'
-import { Send, Mic, MicOff, CheckCircle, Circle, ChevronRight, FileText, Paperclip, X, Image as ImageIcon, Users } from 'lucide-react'
+import { Send, Mic, MicOff, CheckCircle, Circle, ChevronRight, FileText, Paperclip, X, Image as ImageIcon, Users, Download } from 'lucide-react'
 import ClusterStatus from './ClusterStatus'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
@@ -58,6 +58,7 @@ interface AggregatedState {
   receipt_number?: string
   expected_days?: number
   // 공통
+  download_url?: string
   trending_keywords?: TrendingKeyword[]
   ctx?: Ctx
 }
@@ -674,6 +675,18 @@ export default function ConversationBox() {
                 </div>
               </div>
             </>
+          )}
+
+          {/* 제안서 다운로드 */}
+          {aggregatedData.download_url && (
+            <a
+              href={`${API_BASE}${aggregatedData.download_url}`}
+              download
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors"
+            >
+              <Download size={18} />
+              제안서 DOCX 다운로드
+            </a>
           )}
 
           {/* 트렌딩 키워드 */}

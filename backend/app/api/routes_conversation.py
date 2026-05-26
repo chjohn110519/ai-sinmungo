@@ -338,12 +338,22 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
     classification = ctx["classification"]
     responsible_dept = ctx["responsible_dept"]
 
-    # 문제 구조화 (async, 1회 LLM 호출 — 클러스터 데이터 보강용)
+    # 문제 구조화 + 제안서 생성 (자동, 사용자 검토 없음)
     prob: StructuredProblem = await _structurer.structure(combined_message, classification, responsible_dept)
 
-    # 법령·사례 검색 (세션 데이터 저장용)
+    # 법령·사례 검색
     laws = _searcher.search_related_laws(prob, top_k=5)
     cases = _searcher.search_similar_cases(prob, top_k=3)
+
+    # 제안서 생성 및 DOCX 저장
+    draft_proposal = await _structurer.generate_proposal(combined_message, prob, responsible_dept)
+    draft_dict = draft_proposal.model_dump()
+    law_titles = [l.get("title", "") for l in laws if l.get("title")]
+    existing_laws = draft_dict.get("related_laws", [])
+    draft_dict["related_laws"] = list(dict.fromkeys(existing_laws + law_titles))[:8]
+
+    docx_path = generate_docx(draft_dict, classification, None, req.session_id)
+    download_url = f"/api/session/{req.session_id}/download/docx"
 
     # ── 트렌딩 키워드 조회 ────────────────────────────────────────────────
     trending_keywords: list[dict] = []
@@ -378,10 +388,12 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
         "structured_problem": prob.model_dump(),
         "related_laws": laws,
         "similar_cases": cases,
+        "draft_proposal": draft_dict,
+        "docx_filename": docx_path.name,
     }
 
     _try_save_session(db, req.session_id, "aggregated", new_ctx, "structured")
-    _try_save_message(db, req.session_id, "assistant", f"[{classification}] 집적 완료")
+    _try_save_message(db, req.session_id, "assistant", f"[{classification}] 집적 완료 — 제안서: {draft_dict.get('title', '')}")
 
     # ── 집적 현황 (제안/청원) ─────────────────────────────────────────────
     cluster_id = ctx.get("cluster_id")
@@ -403,6 +415,7 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
                     "cluster_triggered": cluster.triggered,
                     "cluster_progress_percent": progress_pct,
                     "proposal_id": cluster.proposal_id,
+                    "download_url": download_url,
                     "trending_keywords": trending_keywords,
                     "ctx": new_ctx,
                 }
@@ -418,6 +431,7 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
         "cluster_id": None,
         "receipt_number": req.session_id[:8].upper(),
         "expected_days": 14,
+        "download_url": download_url,
         "trending_keywords": trending_keywords,
         "ctx": new_ctx,
     }
