@@ -27,7 +27,8 @@ async def transcribe_audio(audio_data: bytes, filename: str = "recording.webm") 
         httpx.HTTPStatusError: Whisper API 오류 응답
         httpx.RequestError: 네트워크 연결 실패
     """
-    if not settings.openai_api_key:
+    api_key = (settings.openai_api_key or "").strip()
+    if not api_key:
         raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다.")
 
     if not audio_data:
@@ -51,7 +52,7 @@ async def transcribe_audio(audio_data: bytes, filename: str = "recording.webm") 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         response = await client.post(
             WHISPER_URL,
-            headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+            headers={"Authorization": f"Bearer {api_key}"},
             files={
                 "file": (safe_filename, BytesIO(audio_data), content_type),
             },

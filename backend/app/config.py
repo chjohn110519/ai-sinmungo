@@ -12,9 +12,16 @@ _DEFAULT_CHROMA = "/tmp/chroma" if _IS_VERCEL else "./chroma_db"
 class Settings(BaseSettings):
     model_config = ConfigDict(env_file=".env", case_sensitive=False, extra="allow")
 
-    # API Keys
+    # API Keys (strip whitespace/newlines in case env var was set with trailing newline)
     anthropic_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
+
+    def model_post_init(self, __context):
+        """환경변수에 포함된 줄바꿈/공백 제거."""
+        if self.openai_api_key:
+            object.__setattr__(self, "openai_api_key", self.openai_api_key.strip())
+        if self.anthropic_api_key:
+            object.__setattr__(self, "anthropic_api_key", self.anthropic_api_key.strip())
 
     # Database
     database_url: str = _DEFAULT_DB
