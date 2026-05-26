@@ -1,5 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from app.stt.whisper_client import transcribe_audio
+from app.stt.whisper_client import transcribe_audio  # async function
 from pydantic import BaseModel
 
 
@@ -27,7 +27,7 @@ async def transcribe_voice(audio: UploadFile = File(...)):
     try:
         audio_data = await audio.read()
         filename = audio.filename or "recording.webm"
-        transcript, confidence = transcribe_audio(audio_data, filename)
+        transcript, confidence = await transcribe_audio(audio_data, filename)
 
         if not transcript:
             raise HTTPException(status_code=422, detail="음성을 인식할 수 없습니다. 다시 시도해 주세요.")
