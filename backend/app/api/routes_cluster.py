@@ -106,6 +106,10 @@ async def get_proposal(proposal_id: str, db: DBSession = Depends(get_db)):
         "responsible_dept": proposal.responsible_dept,
         "related_laws": proposal.related_laws or [],
         "created_at": proposal.created_at.isoformat() if proposal.created_at else None,
+        # APMP 신규 필드
+        "executive_summary": proposal.executive_summary,
+        "win_theme": proposal.win_theme,
+        "proof_points": proposal.proof_points or [],
         "analysis": {
             "pass_probability": analysis.pass_probability if analysis else None,
             "expected_duration_days": analysis.expected_duration_days if analysis else None,

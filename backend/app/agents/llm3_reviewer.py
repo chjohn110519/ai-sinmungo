@@ -18,9 +18,22 @@ except ImportError:
     except ImportError:
         Anthropic = None
 
+_REVIEW_SYSTEM = (
+    "당신은 APMP(Association of Proposal Management Professionals) 인증 레드팀 검토자입니다. "
+    "정부 제안서를 심사위원(의사결정자)의 관점에서 APMP 기준으로 엄격하게 평가합니다."
+)
+
+_DEFAULT_APMP_COMPLIANCE = {
+    "win_theme_present": False,
+    "proof_points_count": 0,
+    "has_executive_summary": False,
+    "buyer_centric": False,
+    "compliance_matrix_complete": True,
+}
+
 
 class LLM3Reviewer:
-    """생성된 제안서를 검토하고 타당성을 분석"""
+    """생성된 제안서를 APMP Red Team 기준으로 검토하고 타당성을 분석"""
 
     def __init__(self):
         self.openai_client = None
@@ -60,23 +73,42 @@ class LLM3Reviewer:
             weaknesses=["세부 운영 계획 미흡", "예산 검토 필요"],
             revision_suggestions=["관련 법령을 명시적으로 추가", "시행 계획 상세화", "부작용 분석 강화"],
             needs_revision=True,
+            apmp_compliance=_DEFAULT_APMP_COMPLIANCE,
+            proof_point_score=0.5,
+            buyer_centric_score=0.5,
         )
 
     def review(self, proposal: PolicyProposal) -> ProposalReview:
-        """제안서 타당성 검토 및 피드백"""
-        prompt = f"""다음 정책 제안서를 전문가 관점에서 검토하세요:
+        """제안서 APMP Red Team 검토 및 타당성 분석"""
+        proof_str = ", ".join(proposal.proof_points or []) or "없음"
+        prompt = f"""다음 정책 제안서를 APMP Red Team 기준으로 검토하세요.
 
+[제안서]
 제목: {proposal.title}
+핵심 메시지(Win Theme): {proposal.win_theme or "없음"}
+의사결정자 요약: {proposal.executive_summary or "없음"}
 배경: {proposal.background}
 주요내용: {proposal.core_requests}
 기대효과: {proposal.expected_effects}
+근거 데이터: {proof_str}
 담당부처: {proposal.responsible_dept}
 
-validity_score: 0.0~1.0 사이 타당성 점수
-strengths: 장점 3가지 목록
-weaknesses: 단점 2-3가지 목록
-revision_suggestions: 개선 제안 2-3가지 목록
-needs_revision: 수정 필요 여부(boolean)"""
+[APMP Red Team 체크리스트]
+1. Win Theme 명확성: 단일하고 설득력 있는 핵심 메시지가 있는가?
+2. 증거 기반(Proof Points): 모든 주장이 수치/통계/사례로 뒷받침되는가?
+3. 독자 중심 언어(Buyer-Centric): "우리" 아닌 "시민/의사결정자" 중심으로 작성되었는가?
+4. Executive Summary 품질: 의사결정자가 30초 내 핵심을 파악할 수 있는가?
+5. 준수 매트릭스: 제목/배경/요청/효과/법령 5개 필수 항목이 모두 충실한가?
+
+[출력 필드]
+validity_score: 0.0~1.0 (APMP 기준 전체 점수. 5개 체크리스트 평균)
+strengths: APMP 관점의 장점 3가지 목록
+weaknesses: 구체적 단점 2-3가지 (예: "Win Theme이 불명확함", "수치 출처 미명시")
+revision_suggestions: APMP 기준 구체적 수정 지시 2-3가지
+needs_revision: APMP 기준 70점(0.70) 미만 시 true
+apmp_compliance: {{"win_theme_present": bool, "proof_points_count": int, "has_executive_summary": bool, "buyer_centric": bool, "compliance_matrix_complete": bool}}
+proof_point_score: 0.0~1.0 (증거 충실도)
+buyer_centric_score: 0.0~1.0 (독자 중심 언어 점수)"""
 
         if self.openai_client is not None:
             try:
@@ -84,12 +116,12 @@ needs_revision: 수정 필요 여부(boolean)"""
                     return self.openai_client.chat.completions.create(
                         model=settings.openai_model_name,
                         messages=[
-                            {"role": "system", "content": "당신은 정책 제안서 검토 및 타당성 평가 전문가입니다."},
+                            {"role": "system", "content": _REVIEW_SYSTEM},
                             {"role": "user", "content": prompt},
                         ],
                         response_model=ProposalReview,
                         max_tokens=1024,
-                        temperature=0.4,
+                        temperature=0.3,
                     )
                 else:
                     return self._openai_review_fallback(prompt)
@@ -102,6 +134,7 @@ needs_revision: 수정 필요 여부(boolean)"""
                     return self.anthropic_client.messages.create(
                         model=settings.anthropic_model_name,
                         max_tokens=1024,
+                        system=_REVIEW_SYSTEM,
                         messages=[{"role": "user", "content": prompt}],
                         response_model=ProposalReview,
                     )
@@ -121,11 +154,11 @@ needs_revision: 수정 필요 여부(boolean)"""
         response = self.openai_client.chat.completions.create(
             model=settings.openai_model_name,
             messages=[
-                {"role": "system", "content": "당신은 정책 제안서 검토 및 타당성 평가 전문가입니다."},
+                {"role": "system", "content": _REVIEW_SYSTEM},
                 {"role": "user", "content": prompt},
             ],
             max_tokens=1024,
-            temperature=0.4,
+            temperature=0.3,
         )
         return self._parse_review(response.choices[0].message.content)
 
@@ -136,6 +169,9 @@ needs_revision: 수정 필요 여부(boolean)"""
             "weaknesses": [],
             "revision_suggestions": [],
             "needs_revision": True,
+            "apmp_compliance": _DEFAULT_APMP_COMPLIANCE,
+            "proof_point_score": 0.5,
+            "buyer_centric_score": 0.5,
         }
         for line in text.split("\n"):
             if ":" not in line:
@@ -156,4 +192,14 @@ needs_revision: 수정 필요 여부(boolean)"""
                 result["revision_suggestions"] = [i.strip() for i in val.split(",") if i.strip()]
             elif key == "needs_revision":
                 result["needs_revision"] = val.lower() in ("true", "yes", "예", "y")
+            elif key == "proof_point_score":
+                try:
+                    result["proof_point_score"] = float(val)
+                except ValueError:
+                    pass
+            elif key == "buyer_centric_score":
+                try:
+                    result["buyer_centric_score"] = float(val)
+                except ValueError:
+                    pass
         return ProposalReview(**result)

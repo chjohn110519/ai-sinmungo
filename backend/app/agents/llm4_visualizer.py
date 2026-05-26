@@ -16,8 +16,14 @@ class LLM4Visualizer:
         cluster_count: int = 0,
     ) -> VisualAnalysis:
         law_count = len(proposal.related_laws)
+        # APMP 콘텐츠 품질 시그널 (proof_point_score, buyer_centric_score)
+        proof_score = getattr(review, 'proof_point_score', None) or 0.6
+        buyer_score = getattr(review, 'buyer_centric_score', None) or 0.6
+        apmp_bonus = (proof_score * 0.5 + buyer_score * 0.5)
         feasibility_score = round(
-            review.validity_score * 0.8 + min(law_count / 10.0, 1.0) * 0.2,
+            review.validity_score * 0.70
+            + min(law_count / 10.0, 1.0) * 0.20
+            + apmp_bonus * 0.10,
             3,
         )
         # 클러스터 참여 인원 보정: 많은 시민이 참여할수록 최대 +0.15 가산

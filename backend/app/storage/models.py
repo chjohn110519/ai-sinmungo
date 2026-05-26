@@ -62,6 +62,11 @@ class StructuredProposal(Base):
     expected_effects = Column(Text)
     responsible_dept = Column(String)           # 소관 부처
     related_laws = Column(JSON)                 # 관련 법령 ID 리스트
+    # APMP 필드
+    win_theme = Column(Text, nullable=True)
+    discriminators = Column(JSON, nullable=True)
+    executive_summary = Column(Text, nullable=True)
+    proof_points = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     session = relationship("Session", back_populates="proposal", foreign_keys=[session_id])

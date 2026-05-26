@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from app.config import settings
 from app.storage.models import Base
@@ -27,8 +27,26 @@ def create_tables():
     Base.metadata.create_all(bind=engine)
 
 
+def _run_migrations():
+    """기존 테이블에 신규 컬럼 추가 (이미 존재하면 무시)."""
+    migrations = [
+        "ALTER TABLE structured_proposals ADD COLUMN win_theme TEXT",
+        "ALTER TABLE structured_proposals ADD COLUMN discriminators TEXT",
+        "ALTER TABLE structured_proposals ADD COLUMN executive_summary TEXT",
+        "ALTER TABLE structured_proposals ADD COLUMN proof_points TEXT",
+    ]
+    with engine.connect() as conn:
+        for sql in migrations:
+            try:
+                conn.execute(text(sql))
+                conn.commit()
+            except Exception:
+                pass  # 컬럼이 이미 존재하면 무시
+
+
 def init_db():
     """데이터베이스 초기화"""
+    _run_migrations()
     create_tables()
     from app.storage.seed import seed_if_empty
     db = SessionLocal()

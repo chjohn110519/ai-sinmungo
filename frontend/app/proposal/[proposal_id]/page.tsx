@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, FileText, CheckCircle, Clock, TrendingUp, Scale } from 'lucide-react'
+import { ArrowLeft, FileText, CheckCircle, Clock, TrendingUp, Scale, Zap, BarChart2 } from 'lucide-react'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 
@@ -16,6 +16,10 @@ interface ProposalData {
   responsible_dept: string
   related_laws: string[]
   created_at: string | null
+  // APMP 신규 필드
+  executive_summary?: string | null
+  win_theme?: string | null
+  proof_points?: string[]
   analysis: {
     pass_probability: number | null
     expected_duration_days: number | null
@@ -98,7 +102,25 @@ export default function ProposalPage() {
               </>
             )}
           </div>
+          {/* APMP Win Theme 배너 */}
+          {proposal.win_theme && (
+            <div className="mt-4 px-4 py-3 bg-white/20 rounded-xl border border-white/30">
+              <p className="text-xs text-green-100 font-semibold mb-1">핵심 메시지</p>
+              <p className="text-sm text-white leading-relaxed">{proposal.win_theme}</p>
+            </div>
+          )}
         </div>
+
+        {/* APMP Executive Summary */}
+        {proposal.executive_summary && (
+          <div className="bg-amber-50 rounded-2xl border border-amber-300 p-5 shadow-sm space-y-2">
+            <h2 className="font-bold text-amber-900 flex items-center gap-2">
+              <Zap size={16} className="text-amber-600" />
+              의사결정자 요약
+            </h2>
+            <p className="text-sm text-amber-800 leading-relaxed">{proposal.executive_summary}</p>
+          </div>
+        )}
 
         {/* 분석 수치 */}
         {proposal.analysis && (
@@ -157,6 +179,24 @@ export default function ProposalPage() {
               기대 효과
             </h2>
             <p className="text-sm text-green-800 leading-relaxed whitespace-pre-line">{proposal.expected_effects}</p>
+          </div>
+        )}
+
+        {/* APMP Proof Points — 근거 데이터 */}
+        {proposal.proof_points && proposal.proof_points.length > 0 && (
+          <div className="bg-indigo-50 rounded-2xl border border-indigo-200 p-5 shadow-sm space-y-3">
+            <h2 className="font-bold text-indigo-900 flex items-center gap-2">
+              <BarChart2 size={16} className="text-indigo-600" />
+              근거 데이터
+            </h2>
+            <ul className="space-y-1.5">
+              {proposal.proof_points.map((point, i) => (
+                <li key={i} className="flex gap-2 text-sm text-indigo-800">
+                  <span className="text-indigo-500 font-bold mt-0.5 flex-shrink-0">·</span>
+                  <span className="leading-relaxed">{point}</span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 

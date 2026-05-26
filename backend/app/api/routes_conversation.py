@@ -94,6 +94,11 @@ def _generate_cluster_proposal(db: DBSession, cluster: ProposalCluster) -> str:
         expected_effects=proposal_dict.get("expected_effects", ""),
         responsible_dept=cluster.responsible_dept,
         related_laws=proposal_dict.get("related_laws", []),
+        # APMP 신규 필드
+        win_theme=proposal_dict.get("win_theme"),
+        discriminators=prob.discriminators,
+        executive_summary=proposal_dict.get("executive_summary"),
+        proof_points=proposal_dict.get("proof_points"),
     )
     db.add(db_proposal)
     db.flush()
@@ -427,6 +432,11 @@ async def conversation_finalize(req: FinalizeRequest, db: DBSession = Depends(ge
             expected_effects=final_proposal.get("expected_effects", ""),
             responsible_dept=final_proposal.get("responsible_dept", ""),
             related_laws=final_proposal.get("related_laws", []),
+            # APMP 신규 필드
+            win_theme=final_proposal.get("win_theme"),
+            discriminators=ctx.get("structured_problem", {}).get("discriminators"),
+            executive_summary=final_proposal.get("executive_summary"),
+            proof_points=final_proposal.get("proof_points"),
         )
         db.add(db_proposal)
         db.flush()
