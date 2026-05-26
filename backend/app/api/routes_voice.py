@@ -1,4 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
+import httpx
 from app.stt.whisper_client import transcribe_audio  # async function
 from pydantic import BaseModel
 
@@ -26,6 +27,9 @@ async def transcribe_voice(audio: UploadFile = File(...)):
 
     try:
         audio_data = await audio.read()
+        if not audio_data:
+            raise HTTPException(status_code=400, detail="오디오 데이터가 비어 있습니다.")
+
         filename = audio.filename or "recording.webm"
         transcript, confidence = await transcribe_audio(audio_data, filename)
 
@@ -36,5 +40,10 @@ async def transcribe_voice(audio: UploadFile = File(...)):
 
     except HTTPException:
         raise
+    except httpx.HTTPStatusError as e:
+        detail = f"Whisper API 오류 ({e.response.status_code}): {e.response.text[:200]}"
+        raise HTTPException(status_code=502, detail=detail)
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"OpenAI 연결 실패: {type(e).__name__} - {str(e)[:200]}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"음성 인식 중 오류 발생: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"음성 인식 오류: {type(e).__name__}: {str(e)[:200]}")
