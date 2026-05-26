@@ -105,7 +105,11 @@ class LLM1Structurer:
     # ── 제안서 생성 ──────────────────────────────────────────────────────────
 
     async def generate_proposal(
-        self, user_input: str, structured_problem: StructuredProblem, responsible_dept: str
+        self,
+        user_input: str,
+        structured_problem: StructuredProblem,
+        responsible_dept: str,
+        web_context: list[dict] | None = None,
     ) -> PolicyProposal:
         """구조화된 문제에서 APMP 방법론 기반 정책 제안서 생성."""
         api_key = _get_api_key()
@@ -113,7 +117,24 @@ class LLM1Structurer:
             return self._default_proposal(user_input, responsible_dept)
 
         discriminators_str = ", ".join(structured_problem.discriminators or []) or "없음"
-        prompt = f"""[입력 정보]
+
+        # ── 웹 검색 컨텍스트 블록 구성 ────────────────────────────────────────
+        web_block = ""
+        if web_context:
+            lines = ["[실제 검색 결과 — 아래 내용만 인용 허용]"]
+            for i, r in enumerate(web_context[:8], 1):
+                title = r.get("title", "")
+                url   = r.get("url", "")
+                body  = r.get("content", "")
+                ref   = f"({url})" if url else ""
+                lines.append(f"{i}. 출처: {title} {ref}\n   {body}")
+            lines.append(
+                "\n[주의] 위 검색 결과에 없는 수치·통계는 절대 생성하지 마세요. "
+                "근거가 불확실한 경우 '(출처 확인 필요)'로 표기하세요."
+            )
+            web_block = "\n".join(lines) + "\n\n"
+
+        prompt = f"""{web_block}[입력 정보]
 민원/제안 내용 (원본 + Q&A 추가 정보 포함):
 {user_input}
 
@@ -134,15 +155,20 @@ executive_summary (150~200자):
 
 win_theme: 위 핵심 승리 메시지를 그대로 유지하거나 보다 설득력 있게 개선.
 
-proof_points (5개 이상 리스트):
-- 각 항목은 반드시 구체적 수치·통계·사례 기반 한 문장.
-- 형식: "○○에 따르면 연간 ○건 발생 (○○년 기준)"
+proof_points (검색 결과에서 확인된 사실 기반, 최대 5개):
+- 반드시 위 [실제 검색 결과]에서 확인된 내용만 사용하세요.
+- 형식: "출처: [제목] — 내용 (URL)" 또는 "○○에 따르면 ○○ (출처 URL)"
+- 검색 결과에 수치가 없으면 해당 항목을 생략하거나 "(출처 확인 필요)"로 표기.
+- 절대로 수치·통계를 추정하거나 발명하지 마세요.
 - 막연한 표현("많은", "크게") 금지.
 
 background (600자 이상):
 ⚠️ 중요: 원본 입력의 "Q1., A., Q2., A." 형식을 그대로 복사하지 마세요.
 모든 내용을 전문적인 행정 서술체로 완전히 재작성해야 합니다.
-- 현황 및 문제점을 구체적 수치·통계와 함께 서술
+- 위 [실제 검색 결과]에서 확인된 통계·수치만 포함하세요.
+- 검색 결과에 없는 구체적 숫자는 추정하지 말고 서술형으로 대체하세요.
+  예: "정확한 규모는 관련 기관 통계 확인이 필요하나, 검색 결과에 따르면..."
+- 현황 및 문제점 서술 (검색 결과 인용 시 출처 명시)
 - 문제의 심각성과 사회적 파급 효과
 - 현행 법령·제도의 한계 및 공백 분석
 - 문제 발생 장소, 시간, 규모 등 Q&A에서 얻은 사실 정보를 자연스러운 문장으로 통합

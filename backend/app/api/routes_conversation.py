@@ -29,6 +29,7 @@ from app.storage.models import (
     ProposalCluster,
 )
 from app.agents.router import AIRouter
+from app.agents.web_searcher import search_for_proposal
 from app.aggregator.cluster import ClusterManager
 from app.aggregator.trigger import TriggerManager
 from app.agents.llm_questioner import LLMQuestioner
@@ -69,7 +70,19 @@ async def _generate_cluster_proposal(db: DBSession, cluster: ProposalCluster) ->
 
     prob = await _structurer.structure(synthetic_msg, cluster.classification, cluster.responsible_dept)
     laws = _searcher.search_related_laws(prob, top_k=5)
-    draft = await _structurer.generate_proposal(synthetic_msg, prob, cluster.responsible_dept)
+
+    # 웹 검색 근거 수집
+    cluster_web_ctx: list[dict] = []
+    try:
+        cluster_web_ctx = await search_for_proposal(cluster.topic or "", cluster.keywords or [])
+        if cluster_web_ctx:
+            print(f"[Agent2/WebSearch] {len(cluster_web_ctx)}개 결과 수집 (cluster={cluster.cluster_id})")
+    except Exception as _cwe:
+        print(f"[Agent2/WebSearch] 오류 (무시됨): {_cwe}")
+
+    draft = await _structurer.generate_proposal(
+        synthetic_msg, prob, cluster.responsible_dept, web_context=cluster_web_ctx
+    )
     proposal_dict = draft.model_dump()
     law_titles = [l.get("title", "") for l in laws if l.get("title")]
     proposal_dict["related_laws"] = list(dict.fromkeys(
@@ -345,8 +358,21 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
     laws = _searcher.search_related_laws(prob, top_k=5)
     cases = _searcher.search_similar_cases(prob, top_k=3)
 
+    # ── 웹 검색 (근거 수집) ─────────────────────────────────────────────────
+    topic = ctx.get("topic", classification)
+    keywords = prob.keywords or ctx.get("keywords", [])
+    web_context: list[dict] = []
+    try:
+        web_context = await search_for_proposal(topic, keywords)
+        if web_context:
+            print(f"[WebSearch] {len(web_context)}개 결과 수집 (topic={topic})")
+    except Exception as _we:
+        print(f"[WebSearch] 오류 (무시됨): {_we}")
+
     # 제안서 생성 및 DOCX 저장
-    draft_proposal = await _structurer.generate_proposal(combined_message, prob, responsible_dept)
+    draft_proposal = await _structurer.generate_proposal(
+        combined_message, prob, responsible_dept, web_context=web_context
+    )
     draft_dict = draft_proposal.model_dump()
     law_titles = [l.get("title", "") for l in laws if l.get("title")]
     existing_laws = draft_dict.get("related_laws", [])

@@ -22,6 +22,8 @@ class Settings(BaseSettings):
             object.__setattr__(self, "openai_api_key", self.openai_api_key.strip())
         if self.anthropic_api_key:
             object.__setattr__(self, "anthropic_api_key", self.anthropic_api_key.strip())
+        if self.tavily_api_key:
+            object.__setattr__(self, "tavily_api_key", self.tavily_api_key.strip())
 
     # Database
     database_url: str = _DEFAULT_DB
@@ -38,6 +40,9 @@ class Settings(BaseSettings):
 
     # 국가법령정보센터 API (https://open.law.go.kr 에서 발급)
     law_api_key: Optional[str] = None
+
+    # Tavily Search API (https://app.tavily.com 에서 발급, 월 1,000회 무료)
+    tavily_api_key: Optional[str] = None
 
     # STT
     whisper_model_size: str = "base"
