@@ -2,13 +2,13 @@
 
 import { useState, useRef } from 'react'
 import Link from 'next/link'
-import { Send, Mic, MicOff, Download, CheckCircle, Circle, ChevronRight, FileText, Paperclip, X, Image as ImageIcon, Expand, Users, AlertCircle } from 'lucide-react'
+import { Send, Mic, MicOff, CheckCircle, Circle, ChevronRight, FileText, Paperclip, X, Image as ImageIcon, Users } from 'lucide-react'
 import ClusterStatus from './ClusterStatus'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 const STORAGE_KEY = 'complaint_sessions'
 
-type Stage = 'idle' | 'questioning' | 'improving' | 'complete'
+type Stage = 'idle' | 'questioning' | 'aggregated'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Ctx = Record<string, any>
@@ -34,59 +34,32 @@ interface QuestioningState {
   ctx?: Ctx
 }
 
-interface Improvement {
-  id: number
-  category: string
-  suggestion: string
-  impact: string
-  requires_info?: string
+interface TrendingKeyword {
+  keyword: string
+  total_count: number
+  cluster_id?: string | null
+  topic?: string | null
 }
 
-interface RefineQuestion {
-  question: string
-  source: string    // "improvement_1" | "weakness_0" 등
-  category: string
-}
-
-interface ImprovingState {
+interface AggregatedState {
   session_id: string
   classification: string
-  draft_proposal: {
-    title: string
-    background: string
-    core_requests: string
-    expected_effects: string
-    responsible_dept: string
-    related_laws: string[]
-  }
-  improvements: Improvement[]
-  refine_questions: RefineQuestion[]
-  related_laws: Array<{ title: string; snippet?: string }>
+  responsible_dept: string
+  // 제안/청원
+  cluster_id?: string | null
+  cluster_topic?: string
+  cluster_keywords?: string[]
+  cluster_count?: number
+  cluster_threshold?: number
+  cluster_triggered?: boolean
+  cluster_progress_percent?: number
+  proposal_id?: string | null
+  // 민원
+  receipt_number?: string
+  expected_days?: number
+  // 공통
+  trending_keywords?: TrendingKeyword[]
   ctx?: Ctx
-}
-
-interface CompleteState {
-  session_id: string
-  classification: string
-  final_proposal: {
-    title: string
-    background: string
-    core_requests: string
-    expected_effects: string
-    responsible_dept: string
-    related_laws: string[]
-  }
-  review: {
-    validity_score: number
-    strengths: string[]
-    weaknesses: string[]
-  }
-  analysis: {
-    feasibility_score: number
-    pass_probability: number
-    expected_duration_days: number
-  }
-  download_url: string
 }
 
 interface AttachmentPreview {
@@ -135,29 +108,12 @@ export default function ConversationBox() {
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [answerRecordingIdx, setAnswerRecordingIdx] = useState<number | null>(null)
-  const [refineAnswers, setRefineAnswers] = useState<Record<string, string>>({})
-  const [refineRecordingKey, setRefineRecordingKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // Stage-specific state
   const [questioningData, setQuestioningData] = useState<QuestioningState | null>(null)
   const [answers, setAnswers] = useState<Record<number, string>>({})
-  const [improvingData, setImprovingData] = useState<ImprovingState | null>(null)
-  const [acceptedIds, setAcceptedIds] = useState<Set<number>>(new Set())
-  const [userNote, setUserNote] = useState('')
-  const [completeData, setCompleteData] = useState<CompleteState | null>(null)
-  const [showDetailModal, setShowDetailModal] = useState(false)
-
-  // 클러스터 정보 — questioning 이후 단계에서도 유지
-  const [clusterInfo, setClusterInfo] = useState<{
-    cluster_id: string
-    topic: string
-    keywords: string[]
-    classification: string
-    cluster_count: number
-    cluster_threshold: number
-    cluster_triggered: boolean
-  } | null>(null)
+  const [aggregatedData, setAggregatedData] = useState<AggregatedState | null>(null)
 
   // Attachments
   const [attachments, setAttachments] = useState<AttachmentPreview[]>([])
@@ -165,7 +121,7 @@ export default function ConversationBox() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
 
-  const sessionId = questioningData?.session_id || improvingData?.session_id || completeData?.session_id || null
+  const sessionId = questioningData?.session_id || aggregatedData?.session_id || null
 
   // ── TURN 1: 초기 메시지 전송 ───────────────────────────────────────────────
   async function handleStart() {
@@ -183,18 +139,6 @@ export default function ConversationBox() {
       const data: QuestioningState = await res.json()
       setQuestioningData(data)
       setAnswers({})
-      // 클러스터 정보 저장 (이후 단계에서도 표시)
-      if (data.cluster_id && data.classification !== '민원') {
-        setClusterInfo({
-          cluster_id: data.cluster_id,
-          topic: data.topic || '기타',
-          keywords: data.keywords || [],
-          classification: data.classification,
-          cluster_count: data.cluster_count ?? 1,
-          cluster_threshold: data.cluster_threshold ?? 50,
-          cluster_triggered: data.cluster_triggered ?? false,
-        })
-      }
       setStage('questioning')
       persistSession(data.session_id)
       upsertComplaintSummary({
@@ -231,64 +175,9 @@ export default function ConversationBox() {
         }),
       })
       if (!res.ok) throw new Error(await res.text())
-      const data: ImprovingState = await res.json()
-      setImprovingData(data)
-      setAcceptedIds(new Set(data.improvements.map(i => i.id)))
-      setUserNote('')
-      setStage('improving')
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '오류가 발생했습니다.')
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  // ── TURN 3: 개선안 수락 후 최종 완성 ──────────────────────────────────────
-  async function handleFinalize() {
-    if (!improvingData) return
-    setIsLoading(true)
-    setError(null)
-    try {
-      const res = await fetch(`${API_BASE}/api/conversation/finalize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: improvingData.session_id,
-          accepted_improvement_ids: Array.from(acceptedIds),
-          user_note: userNote,
-          refine_answers: refineAnswers,
-          ctx: improvingData.ctx,   // 서버리스용: 컨텍스트 전달
-        }),
-      })
-      if (!res.ok) throw new Error(await res.text())
-      const data: CompleteState = await res.json()
-      setCompleteData(data)
-      setStage('complete')
-      // Persist result data and complaint summary to localStorage
-      try {
-        const sessionId = improvingData.session_id
-        localStorage.setItem(`result_${sessionId}`, JSON.stringify({
-          session: { session_id: sessionId, status: 'completed', final_classification: data.classification },
-          proposal: data.final_proposal,
-          analysis: {
-            feasibility_score: data.analysis.feasibility_score,
-            pass_probability: data.analysis.pass_probability,
-            expected_duration_days: data.analysis.expected_duration_days,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            similar_cases: (data as any).similar_cases || [],
-            visualization_data: { timeline: [] },
-          },
-          review: data.review,
-          download_url: data.download_url,
-        }))
-        upsertComplaintSummary({
-          session_id: sessionId,
-          title: data.final_proposal.title,
-          classification: data.classification,
-          status: 'completed',
-          created_at: new Date().toISOString(),
-        })
-      } catch {}
+      const data: AggregatedState = await res.json()
+      setAggregatedData(data)
+      setStage('aggregated')
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '오류가 발생했습니다.')
     } finally {
@@ -440,95 +329,21 @@ export default function ConversationBox() {
     }
   }
 
-  // ── 보완 질문 텍스트에어리어용 음성 녹음 ────────────────────────────────────
-  async function toggleRefineRecording(key: string) {
-    if (isRecording) {
-      mediaRecorderRef.current?.stop()
-      setIsRecording(false)
-      setRefineRecordingKey(null)
-      return
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mimeType = ['audio/webm', 'audio/ogg', 'audio/mp4', ''].find(
-        m => m === '' || MediaRecorder.isTypeSupported(m)
-      ) ?? ''
-      const mr = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream)
-      audioChunksRef.current = []
-      mr.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
-      mr.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop())
-        if (audioChunksRef.current.length === 0) {
-          setError('녹음된 음성이 없습니다. 다시 시도해 주세요.')
-          setRefineRecordingKey(null)
-          return
-        }
-        const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || 'audio/webm' })
-        const ext = (mr.mimeType || 'audio/webm').includes('mp4') ? 'mp4'
-          : (mr.mimeType || '').includes('ogg') ? 'ogg' : 'webm'
-        const formData = new FormData()
-        formData.append('audio', blob, `recording.${ext}`)
-        setIsTranscribing(true)
-        try {
-          const res = await fetch(`${API_BASE}/api/voice/transcribe`, { method: 'POST', body: formData })
-          if (res.ok) {
-            const data = await res.json()
-            setRefineAnswers(prev => ({
-              ...prev,
-              [key]: (prev[key] ? prev[key] + ' ' : '') + data.transcript,
-            }))
-          } else {
-            const err = await res.json().catch(() => ({ detail: '음성 인식 실패' }))
-            setError(err.detail || '음성 인식에 실패했습니다.')
-          }
-        } catch {
-          setError('음성 인식 서버에 연결할 수 없습니다.')
-        } finally {
-          setIsTranscribing(false)
-          setRefineRecordingKey(null)
-        }
-      }
-      mr.start(250)
-      mediaRecorderRef.current = mr
-      setIsRecording(true)
-      setRefineRecordingKey(key)
-    } catch {
-      setError('마이크 접근 권한이 필요합니다.')
-    }
-  }
-
   function resetAll() {
     setStage('idle')
     setInput('')
     setQuestioningData(null)
-    setImprovingData(null)
-    setCompleteData(null)
-    setClusterInfo(null)
+    setAggregatedData(null)
     setAnswers({})
-    setAcceptedIds(new Set())
-    setUserNote('')
-    setRefineAnswers({})
-    setRefineRecordingKey(null)
     setAttachments([])
     setError(null)
-  }
-
-  const categoryColors: Record<string, string> = {
-    '법적근거강화': 'bg-blue-100 text-blue-800',
-    '데이터보완': 'bg-green-100 text-green-800',
-    '대상확장': 'bg-purple-100 text-purple-800',
-    '제도적맥락': 'bg-orange-100 text-orange-800',
-    '표현개선': 'bg-pink-100 text-pink-800',
   }
 
   // ── Stage 진행 표시 ────────────────────────────────────────────────────────
   const stages = [
     { key: 'idle', label: '민원 작성' },
     { key: 'questioning', label: 'AI 질문' },
-    { key: 'improving', label: '개선안 검토' },
-    { key: 'complete', label: '제안서 완성' },
+    { key: 'aggregated', label: '집적 완료' },
   ]
   const currentStageIdx = stages.findIndex(s => s.key === stage)
 
@@ -748,406 +563,164 @@ export default function ConversationBox() {
         </div>
       )}
 
-      {/* ── STAGE: improving ──────────────────────────────────────────────────── */}
-      {stage === 'improving' && improvingData && (
+      {/* ── STAGE: aggregated ────────────────────────────────────────────────── */}
+      {stage === 'aggregated' && aggregatedData && (
         <div className="space-y-4">
-          {/* Draft proposal summary */}
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-3">
-            <div className="flex items-start justify-between gap-2">
-              <h2 className="text-base font-semibold text-gray-800">
-                📄 {improvingData.draft_proposal.title}
-              </h2>
-              <span className={`flex-shrink-0 px-2 py-0.5 rounded text-xs font-medium ${
-                improvingData.classification === '민원' ? 'bg-orange-100 text-orange-700' :
-                improvingData.classification === '제안' ? 'bg-blue-100 text-blue-700' :
-                'bg-purple-100 text-purple-700'
-              }`}>{improvingData.classification}</span>
-            </div>
-            <p className="text-sm text-gray-600 line-clamp-3">{improvingData.draft_proposal.background}</p>
-            {improvingData.draft_proposal.related_laws.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {improvingData.draft_proposal.related_laws.slice(0, 5).map((law, i) => (
-                  <span key={i} className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full">{law}</span>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Improvements */}
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
-            <div>
-              <h3 className="text-base font-semibold text-gray-800">통과 확률을 높이는 개선안</h3>
-              <p className="text-sm text-gray-500 mt-0.5">원하는 개선안을 선택하세요. 선택한 항목이 최종 제안서에 반영됩니다.</p>
-            </div>
-
-            <div className="space-y-3">
-              {improvingData.improvements.map(imp => {
-                const accepted = acceptedIds.has(imp.id)
-                return (
-                  <div
-                    key={imp.id}
-                    onClick={() => setAcceptedIds(prev => {
-                      const next = new Set(prev)
-                      if (next.has(imp.id)) next.delete(imp.id)
-                      else next.add(imp.id)
-                      return next
-                    })}
-                    className={`cursor-pointer rounded-lg border p-4 transition-all ${
-                      accepted ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center ${
-                        accepted ? 'border-blue-500 bg-blue-500' : 'border-gray-300'
-                      }`}>
-                        {accepted && <CheckCircle size={12} className="text-white" />}
-                      </div>
-                      <div className="flex-1 space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${categoryColors[imp.category] || 'bg-gray-100 text-gray-700'}`}>
-                            {imp.category}
-                          </span>
-                        </div>
-                        <p className="text-sm text-gray-800">{imp.suggestion}</p>
-                        <p className="text-xs text-gray-500">💡 {imp.impact}</p>
-                        {imp.requires_info && (
-                          <p className="text-xs text-amber-600">⚠ 추가 정보 필요: {imp.requires_info}</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-
-            {/* 보완 질문 섹션 */}
-            {improvingData.refine_questions?.length > 0 && (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-4">
-                <div>
-                  <h3 className="font-semibold text-amber-900 flex items-center gap-2 text-sm">
-                    <AlertCircle size={15} /> 제안서 완성을 위한 추가 질문
-                  </h3>
-                  <p className="text-xs text-amber-700 mt-0.5">아래 질문에 답변할수록 최종 제안서 품질이 높아집니다 (선택사항)</p>
+          {/* 제안/청원: 집적 현황 */}
+          {aggregatedData.cluster_id ? (
+            <>
+              {/* 접수 확인 헤더 */}
+              <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-6 text-white">
+                <div className="flex items-center gap-2 mb-1">
+                  <CheckCircle size={20} />
+                  <span className="font-semibold text-lg">의견이 접수되었습니다!</span>
                 </div>
-                {improvingData.refine_questions.map((q) => (
-                  <div key={q.source} className="space-y-1.5">
-                    <div className="flex items-start gap-2">
-                      <span className="flex-shrink-0 text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full font-medium">
-                        {q.category}
-                      </span>
-                      <label className="text-sm text-amber-900 leading-snug">{q.question}</label>
-                    </div>
-                    <div className="relative">
-                      <textarea
-                        value={refineAnswers[q.source] || ''}
-                        onChange={e => setRefineAnswers(prev => ({ ...prev, [q.source]: e.target.value }))}
-                        placeholder={
-                          isTranscribing && refineRecordingKey === q.source
-                            ? '음성 인식 중…'
-                            : isRecording && refineRecordingKey === q.source
-                            ? '🎙 녹음 중… (버튼을 눌러 중지)'
-                            : '답변을 입력하세요 (선택)'
-                        }
-                        rows={2}
-                        className="w-full border border-amber-200 rounded-lg p-2.5 pr-10 text-sm resize-none bg-white focus:outline-none focus:ring-2 focus:ring-amber-400 placeholder:text-amber-300"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => toggleRefineRecording(q.source)}
-                        disabled={isRecording && refineRecordingKey !== q.source}
-                        title={isRecording && refineRecordingKey === q.source ? '녹음 중지' : '음성으로 답변'}
-                        className={`absolute right-2 bottom-2 p-1.5 rounded-full transition-colors disabled:opacity-30 ${
-                          isRecording && refineRecordingKey === q.source
-                            ? 'bg-red-100 hover:bg-red-200'
-                            : 'hover:bg-amber-100'
-                        }`}
-                      >
-                        {isTranscribing && refineRecordingKey === q.source ? (
-                          <Mic size={14} className="text-blue-500 animate-pulse" />
-                        ) : isRecording && refineRecordingKey === q.source ? (
-                          <MicOff size={14} className="text-red-500" />
-                        ) : (
-                          <Mic size={14} className="text-amber-500" />
-                        )}
-                      </button>
-                    </div>
+                <p className="text-blue-200 text-sm">
+                  {aggregatedData.cluster_count}번째로 같은 방향의 의견을 보태셨습니다
+                </p>
+              </div>
+
+              {/* 집적 현황 카드 */}
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-gray-800">📊 집적 현황</h3>
+                  {aggregatedData.cluster_topic && (
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                      aggregatedData.classification === '제안' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
+                    }`}>
+                      {aggregatedData.cluster_topic}
+                    </span>
+                  )}
+                </div>
+
+                {/* 진행바 */}
+                <div>
+                  <div className="flex justify-between text-xs text-gray-500 mb-1.5">
+                    <span className="font-medium text-blue-600">{aggregatedData.cluster_count?.toLocaleString()}명 참여</span>
+                    <span>목표 {aggregatedData.cluster_threshold?.toLocaleString()}명</span>
                   </div>
-                ))}
+                  <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full transition-all"
+                      style={{ width: `${aggregatedData.cluster_progress_percent ?? 0}%` }}
+                    />
+                  </div>
+                  {!aggregatedData.cluster_triggered ? (
+                    <p className="text-xs text-gray-500 mt-1.5">
+                      {((aggregatedData.cluster_threshold ?? 0) - (aggregatedData.cluster_count ?? 0)).toLocaleString()}명이 더 참여하면 AI가 공식 제안서를 자동 생성합니다
+                    </p>
+                  ) : (
+                    <p className="text-xs text-green-700 mt-1.5 font-semibold flex items-center gap-1">
+                      <CheckCircle size={12} /> 공식 제안서가 생성되었습니다!
+                    </p>
+                  )}
+                </div>
+
+                {/* 키워드 */}
+                {aggregatedData.cluster_keywords && aggregatedData.cluster_keywords.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {aggregatedData.cluster_keywords.slice(0, 8).map((kw, i) => (
+                      <span key={i} className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full">{kw}</span>
+                    ))}
+                  </div>
+                )}
+
+                {/* 버튼 */}
+                <div className="flex gap-2 pt-1">
+                  {aggregatedData.cluster_triggered && aggregatedData.proposal_id && (
+                    <a
+                      href={`${API_BASE}/api/proposal/${aggregatedData.proposal_id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex-1 text-center px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
+                    >
+                      공식 제안서 보기
+                    </a>
+                  )}
+                  <Link
+                    href={`/cluster/${aggregatedData.cluster_id}`}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 border border-blue-300 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors"
+                  >
+                    <Users size={14} />
+                    집계 현황 보기
+                  </Link>
+                </div>
               </div>
-            )}
-
-            <div className="space-y-1.5 pt-1">
-              <label className="text-sm font-medium text-gray-700">추가 요청사항 (선택)</label>
-              <textarea
-                value={userNote}
-                onChange={e => setUserNote(e.target.value)}
-                placeholder="추가로 강조하고 싶은 내용을 입력하세요..."
-                rows={2}
-                className="w-full border border-gray-300 rounded-lg p-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            <div className="flex items-center justify-between pt-1">
-              <button onClick={resetAll} className="text-sm text-gray-400 hover:text-gray-600">
-                ← 처음으로
-              </button>
-              <button
-                onClick={handleFinalize}
-                disabled={isLoading}
-                className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
-              >
-                {isLoading ? '제안서 완성 중…' : '제안서 완성하기'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── STAGE: complete ───────────────────────────────────────────────────── */}
-      {stage === 'complete' && completeData && (
-        <div className="space-y-4">
-          {/* Success header */}
-          <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-6 text-white">
-            <div className="flex items-center gap-2 mb-2">
-              <CheckCircle size={20} />
-              <span className="font-semibold">제안서가 완성되었습니다!</span>
-            </div>
-            <h2 className="text-xl font-bold">{completeData.final_proposal.title}</h2>
-            <p className="text-blue-200 text-sm mt-1">{completeData.final_proposal.responsible_dept}</p>
-          </div>
-
-          {/* 클러스터 집계 현황 */}
-          {clusterInfo && (
-            <ClusterStatus
-              clusterId={clusterInfo.cluster_id}
-              topic={clusterInfo.topic}
-              keywords={clusterInfo.keywords}
-              classification={clusterInfo.classification}
-              count={clusterInfo.cluster_count}
-              threshold={clusterInfo.cluster_threshold}
-              triggered={clusterInfo.cluster_triggered}
-              progressPercent={Math.round((clusterInfo.cluster_count / clusterInfo.cluster_threshold) * 100)}
-            />
-          )}
-
-          {/* Analysis metrics */}
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { label: '실현 가능성', value: `${Math.round(completeData.analysis.feasibility_score * 100)}%`, color: 'text-blue-600' },
-              { label: '통과 예상 확률', value: `${Math.round(completeData.analysis.pass_probability * 100)}%`, color: 'text-green-600' },
-              { label: '예상 처리 기간', value: `${completeData.analysis.expected_duration_days}일`, color: 'text-orange-600' },
-            ].map(m => (
-              <div key={m.label} className="bg-white rounded-xl border border-gray-200 p-4 text-center">
-                <div className={`text-2xl font-bold ${m.color}`}>{m.value}</div>
-                <div className="text-xs text-gray-500 mt-1">{m.label}</div>
+            </>
+          ) : (
+            <>
+              {/* 민원: 접수 완료 */}
+              <div className="bg-gradient-to-r from-green-600 to-green-700 rounded-xl p-6 text-white">
+                <div className="flex items-center gap-2 mb-1">
+                  <CheckCircle size={20} />
+                  <span className="font-semibold text-lg">민원이 접수되었습니다!</span>
+                </div>
+                <p className="text-green-200 text-sm">담당 기관에 전달됩니다</p>
               </div>
-            ))}
-          </div>
 
-          {/* Final proposal */}
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
-            <h3 className="font-semibold text-gray-800">최종 제안서 내용</h3>
-            {[
-              { label: '제안 배경', content: completeData.final_proposal.background },
-              { label: '주요 요청 사항', content: completeData.final_proposal.core_requests },
-              { label: '기대 효과', content: completeData.final_proposal.expected_effects },
-            ].map(section => (
-              <div key={section.label}>
-                <h4 className="text-sm font-semibold text-gray-600 mb-1">{section.label}</h4>
-                <p className="text-sm text-gray-700 whitespace-pre-line">{section.content}</p>
-              </div>
-            ))}
-            {completeData.final_proposal.related_laws.length > 0 && (
-              <div>
-                <h4 className="text-sm font-semibold text-gray-600 mb-1.5">관련 법령</h4>
-                <div className="flex flex-wrap gap-1.5">
-                  {completeData.final_proposal.related_laws.map((law, i) => (
-                    <span key={i} className="text-xs px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full border border-blue-200">{law}</span>
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-3">
+                <h3 className="font-semibold text-gray-800">📋 접수 정보</h3>
+                <div className="space-y-2">
+                  {[
+                    { label: '접수번호', value: aggregatedData.receipt_number, mono: true },
+                    { label: '담당 기관', value: aggregatedData.responsible_dept },
+                    { label: '처리 예정', value: `약 ${aggregatedData.expected_days}일 이내` },
+                  ].map(r => (
+                    <div key={r.label} className="flex justify-between items-center text-sm py-1.5 border-b border-gray-50 last:border-0">
+                      <span className="text-gray-500">{r.label}</span>
+                      <span className={`font-medium ${r.mono ? 'font-mono text-blue-700' : 'text-gray-800'}`}>{r.value}</span>
+                    </div>
                   ))}
                 </div>
               </div>
-            )}
-          </div>
-
-          {/* Review */}
-          {completeData.review && (
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-gray-800">AI 검토 의견</h3>
-                <span className="text-sm font-bold text-blue-600">
-                  타당성 {Math.round(completeData.review.validity_score * 100)}점
-                </span>
-              </div>
-              {completeData.review.strengths?.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-green-700 mb-1">강점</p>
-                  <ul className="text-sm text-gray-700 space-y-0.5">
-                    {completeData.review.strengths.map((s, i) => <li key={i}>✓ {s}</li>)}
-                  </ul>
-                </div>
-              )}
-              {completeData.review.weaknesses?.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-amber-700 mb-1">보완점</p>
-                  <ul className="text-sm text-gray-700 space-y-0.5">
-                    {completeData.review.weaknesses.map((w, i) => <li key={i}>△ {w}</li>)}
-                  </ul>
-                </div>
-              )}
-            </div>
+            </>
           )}
 
-          {/* Actions */}
-          <div className="flex items-center gap-3">
-            <a
-              href={`${API_BASE}${completeData.download_url}`}
-              download
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors"
-            >
-              <Download size={18} />
-              DOCX 다운로드
-            </a>
-            <button
-              onClick={() => setShowDetailModal(true)}
-              className="flex items-center gap-2 px-4 py-3 bg-white text-blue-600 border border-blue-300 rounded-xl font-semibold hover:bg-blue-50 transition-colors"
-            >
-              <Expand size={16} />
-              상세 결과 보기
-            </button>
-          </div>
-
-          {/* 클러스터 집계 현황 바로가기 */}
-          {clusterInfo && (
-            <Link
-              href={`/cluster/${clusterInfo.cluster_id}`}
-              className="w-full flex items-center justify-center gap-2 py-2.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-xl text-sm font-medium hover:bg-blue-100 transition-colors"
-            >
-              <Users size={15} />
-              집계 현황 보기 — 현재 {clusterInfo.cluster_count.toLocaleString()}명 참여 중
-            </Link>
+          {/* 트렌딩 키워드 */}
+          {aggregatedData.trending_keywords && aggregatedData.trending_keywords.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-gray-800">🔥 지금 핫한 키워드</h3>
+                <Link href="/clusters" className="text-xs text-blue-600 hover:underline">전체 보기 →</Link>
+              </div>
+              <div className="space-y-2">
+                {(() => {
+                  const maxCount = aggregatedData.trending_keywords![0].total_count || 1
+                  return aggregatedData.trending_keywords!.slice(0, 5).map((item, i) => (
+                    <div key={item.keyword} className="flex items-center gap-2.5">
+                      <span className="text-xs font-bold text-gray-400 w-4 flex-shrink-0">{i + 1}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-0.5">
+                          {item.cluster_id ? (
+                            <Link href={`/cluster/${item.cluster_id}`}
+                              className="text-sm font-medium text-blue-700 hover:underline truncate">
+                              {item.keyword}
+                            </Link>
+                          ) : (
+                            <span className="text-sm font-medium text-gray-800 truncate">{item.keyword}</span>
+                          )}
+                          <span className="text-xs text-gray-400 ml-2 flex-shrink-0">{item.total_count}</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full"
+                            style={{ width: `${Math.round((item.total_count / maxCount) * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                })()}
+              </div>
+            </div>
           )}
 
           <button
             onClick={resetAll}
             className="w-full text-sm text-gray-400 hover:text-gray-600 py-2"
           >
-            새 민원 작성하기
+            새 의견 제출하기
           </button>
-        </div>
-      )}
-
-      {/* ── 전체 결과 모달 ────────────────────────────────────────────────────── */}
-      {showDetailModal && completeData && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-gray-50 overflow-y-auto">
-          {/* 모달 헤더 */}
-          <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm">
-            <h2 className="font-bold text-gray-900 text-base truncate">{completeData.final_proposal.title}</h2>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <a
-                href={`${API_BASE}${completeData.download_url}`}
-                download
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition"
-              >
-                <Download size={14} /> DOCX
-              </a>
-              <button
-                onClick={() => setShowDetailModal(false)}
-                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"
-              >
-                <X size={20} />
-              </button>
-            </div>
-          </div>
-
-          <div className="max-w-3xl mx-auto w-full px-4 py-6 space-y-6">
-            {/* 분류 + 담당 */}
-            <div className="flex items-center gap-3">
-              <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                completeData.classification === '민원' ? 'bg-orange-100 text-orange-700' :
-                completeData.classification === '제안' ? 'bg-blue-100 text-blue-700' :
-                'bg-purple-100 text-purple-700'
-              }`}>{completeData.classification}</span>
-              <span className="text-sm text-gray-500">{completeData.final_proposal.responsible_dept}</span>
-            </div>
-
-            {/* 분석 지표 */}
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { label: '실현 가능성', value: `${Math.round(completeData.analysis.feasibility_score * 100)}%`, color: 'text-blue-600' },
-                { label: '통과 예상 확률', value: `${Math.round(completeData.analysis.pass_probability * 100)}%`, color: 'text-emerald-600' },
-                { label: '예상 처리 기간', value: `${completeData.analysis.expected_duration_days}일`, color: 'text-purple-600' },
-              ].map(m => (
-                <div key={m.label} className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 text-center">
-                  <div className={`text-3xl font-bold ${m.color}`}>{m.value}</div>
-                  <div className="text-xs text-gray-500 mt-1">{m.label}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* 제안서 전문 */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 space-y-5">
-              <h3 className="text-lg font-bold text-gray-900">📄 최종 제안서 전문</h3>
-              {[
-                { label: '제안 배경', content: completeData.final_proposal.background },
-                { label: '주요 요청 사항', content: completeData.final_proposal.core_requests },
-                { label: '기대 효과', content: completeData.final_proposal.expected_effects },
-              ].map(s => (
-                <div key={s.label} className="border-t border-gray-100 pt-4 first:border-0 first:pt-0">
-                  <h4 className="text-sm font-bold text-gray-700 mb-2">{s.label}</h4>
-                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{s.content}</p>
-                </div>
-              ))}
-              {completeData.final_proposal.related_laws.length > 0 && (
-                <div className="border-t border-gray-100 pt-4">
-                  <h4 className="text-sm font-bold text-gray-700 mb-2">관련 법령</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {completeData.final_proposal.related_laws.map((law, i) => (
-                      <span key={i} className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded-full border border-blue-200">{law}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* AI 검토 의견 */}
-            {completeData.review && (
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-bold text-gray-900">AI 검토 의견</h3>
-                  <span className="text-sm font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
-                    타당성 {Math.round(completeData.review.validity_score * 100)}점
-                  </span>
-                </div>
-                {completeData.review.strengths?.length > 0 && (
-                  <div>
-                    <p className="text-xs font-semibold text-green-700 mb-2">✅ 강점</p>
-                    <ul className="space-y-1">
-                      {completeData.review.strengths.map((s, i) => (
-                        <li key={i} className="text-sm text-gray-700 flex gap-2"><span className="text-green-500 flex-shrink-0">✓</span>{s}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {completeData.review.weaknesses?.length > 0 && (
-                  <div>
-                    <p className="text-xs font-semibold text-amber-700 mb-2">⚠ 보완점</p>
-                    <ul className="space-y-1">
-                      {completeData.review.weaknesses.map((w, i) => (
-                        <li key={i} className="text-sm text-gray-700 flex gap-2"><span className="text-amber-500 flex-shrink-0">△</span>{w}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <button
-              onClick={() => setShowDetailModal(false)}
-              className="w-full py-3 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-xl bg-white"
-            >
-              닫기
-            </button>
-          </div>
         </div>
       )}
     </div>

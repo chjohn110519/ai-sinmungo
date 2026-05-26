@@ -57,7 +57,7 @@ _improver = LLMImprover()
 
 # ── Agent 2: 클러스터 레벨 공식문서 자동 생성 ────────────────────────────────
 
-def _generate_cluster_proposal(db: DBSession, cluster: ProposalCluster) -> str:
+async def _generate_cluster_proposal(db: DBSession, cluster: ProposalCluster) -> str:
     """클러스터 집계가 임계치에 도달했을 때 공식 제안서를 자동 생성한다."""
     synthetic_msg = (
         f"주제: {cluster.topic}\n"
@@ -67,9 +67,9 @@ def _generate_cluster_proposal(db: DBSession, cluster: ProposalCluster) -> str:
         f"이를 바탕으로 공식 {cluster.classification} 문서를 작성해주세요."
     )
 
-    prob = _structurer.structure(synthetic_msg, cluster.classification, cluster.responsible_dept)
+    prob = await _structurer.structure(synthetic_msg, cluster.classification, cluster.responsible_dept)
     laws = _searcher.search_related_laws(prob, top_k=5)
-    draft = _structurer.generate_proposal(synthetic_msg, prob, cluster.responsible_dept)
+    draft = await _structurer.generate_proposal(synthetic_msg, prob, cluster.responsible_dept)
     proposal_dict = draft.model_dump()
     law_titles = [l.get("title", "") for l in laws if l.get("title")]
     proposal_dict["related_laws"] = list(dict.fromkeys(
@@ -241,7 +241,7 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
             # Agent 2: 임계치 도달 시 인라인으로 공식문서 생성
             if _trigger_mgr.should_trigger(cluster):
                 try:
-                    new_proposal_id = _generate_cluster_proposal(db, cluster)
+                    new_proposal_id = await _generate_cluster_proposal(db, cluster)
                     cluster.proposal_id = new_proposal_id
                     db.add(cluster)
                     _trigger_mgr.mark_triggered(db, cluster)
@@ -311,7 +311,7 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
 
 @router.post("/conversation/answer")
 async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db)):
-    """사용자 답변을 처리하고 초안 제안서 + 개선안을 반환합니다."""
+    """사용자 답변을 처리하고 집적 현황을 반환합니다."""
     # 컨텍스트 우선순위: 요청 페이로드 > DB
     if req.ctx and req.ctx.get("stage") == "questioning":
         ctx = req.ctx
@@ -321,7 +321,6 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
     questions: list = ctx.get("questions", [])
 
     def _q_text(idx: int) -> str:
-        """질문 항목에서 텍스트 추출 (str 또는 {"question": ...} dict 모두 처리)."""
         if idx >= len(questions):
             return ""
         item = questions[idx]
@@ -339,75 +338,87 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
     classification = ctx["classification"]
     responsible_dept = ctx["responsible_dept"]
 
-    # 문제 구조화 (async)
+    # 문제 구조화 (async, 1회 LLM 호출 — 클러스터 데이터 보강용)
     prob: StructuredProblem = await _structurer.structure(combined_message, classification, responsible_dept)
 
-    # 법령 검색
+    # 법령·사례 검색 (세션 데이터 저장용)
     laws = _searcher.search_related_laws(prob, top_k=5)
     cases = _searcher.search_similar_cases(prob, top_k=3)
 
-    # 초안 제안서 생성 (async)
-    draft_proposal = await _structurer.generate_proposal(combined_message, prob, responsible_dept)
-    draft_dict = draft_proposal.model_dump()
-    law_titles = [l.get("title", "") for l in laws if l.get("title")]
-    existing = draft_dict.get("related_laws", [])
-    draft_dict["related_laws"] = list(dict.fromkeys(existing + law_titles))[:8]
-
-    # 개선안 제안
-    improvements = _improver.suggest(classification, draft_dict, answers_text, n=4)
-    improvements_data = [imp.model_dump() for imp in improvements]
-
-    # ── 보완 질문 생성 ────────────────────────────────────────────────────
-    # 개선안의 requires_info + 리뷰 weaknesses → 사용자에게 추가로 물을 질문들
-    refine_questions = []
-    for imp in improvements:
-        if imp.requires_info:
-            refine_questions.append({
-                "question": imp.requires_info,
-                "source": f"improvement_{imp.id}",
-                "category": imp.category,
-            })
-    # 리뷰 weaknesses도 보완 질문으로 변환 (미리 계산)
+    # ── 트렌딩 키워드 조회 ────────────────────────────────────────────────
+    trending_keywords: list[dict] = []
     try:
-        from app.schemas.proposal import PolicyProposal as PP
-        draft_obj = PP(**draft_dict)
-        quick_review = _reviewer.review(draft_obj)
-        for i, w in enumerate(quick_review.weaknesses or []):
-            refine_questions.append({
-                "question": f"{w} — 이 부분을 보완할 추가 정보가 있다면 알려주세요.",
-                "source": f"weakness_{i}",
-                "category": "보완",
-            })
+        all_clusters = db.query(ProposalCluster).all()
+        kw_weights: dict[str, int] = {}
+        kw_best: dict[str, dict] = {}
+        for c in all_clusters:
+            for kw in (c.keywords or []):
+                kw_weights[kw] = kw_weights.get(kw, 0) + c.count
+                prev = kw_best.get(kw)
+                if prev is None or c.count > prev["count"]:
+                    kw_best[kw] = {"cluster_id": c.cluster_id, "topic": c.topic, "count": c.count}
+        top_kws = sorted(kw_weights.items(), key=lambda x: x[1], reverse=True)[:10]
+        trending_keywords = [
+            {
+                "keyword": kw,
+                "total_count": cnt,
+                "cluster_id": kw_best.get(kw, {}).get("cluster_id"),
+                "topic": kw_best.get(kw, {}).get("topic"),
+            }
+            for kw, cnt in top_kws
+        ]
     except Exception as e:
-        print(f"[보완질문] 리뷰 생성 오류 (무시됨): {e}")
+        print(f"[트렌딩키워드] 조회 오류 (무시됨): {e}")
 
     new_ctx = {
         **ctx,
-        "stage": "improving",
+        "stage": "aggregated",
         "user_answers": answers_text,
         "combined_message": combined_message,
         "structured_problem": prob.model_dump(),
         "related_laws": laws,
         "similar_cases": cases,
-        "draft_proposal": draft_dict,
-        "improvements": improvements_data,
-        "refine_questions": refine_questions,
     }
 
-    _try_save_session(db, req.session_id, "improving", new_ctx, "structured")
-    _try_save_message(db, req.session_id, "assistant",
-        f"초안 제안서 작성 완료: 『{draft_dict['title']}』")
+    _try_save_session(db, req.session_id, "aggregated", new_ctx, "structured")
+    _try_save_message(db, req.session_id, "assistant", f"[{classification}] 집적 완료")
 
+    # ── 집적 현황 (제안/청원) ─────────────────────────────────────────────
+    cluster_id = ctx.get("cluster_id")
+    if cluster_id and classification in ("제안", "청원"):
+        try:
+            cluster = db.get(ProposalCluster, cluster_id)
+            if cluster:
+                progress_pct = min(int(cluster.count / cluster.threshold * 100), 100) if cluster.threshold else 0
+                return {
+                    "session_id": req.session_id,
+                    "stage": "aggregated",
+                    "classification": classification,
+                    "responsible_dept": responsible_dept,
+                    "cluster_id": cluster.cluster_id,
+                    "cluster_topic": cluster.topic,
+                    "cluster_keywords": cluster.keywords or [],
+                    "cluster_count": cluster.count,
+                    "cluster_threshold": cluster.threshold,
+                    "cluster_triggered": cluster.triggered,
+                    "cluster_progress_percent": progress_pct,
+                    "proposal_id": cluster.proposal_id,
+                    "trending_keywords": trending_keywords,
+                    "ctx": new_ctx,
+                }
+        except Exception as e:
+            print(f"[Answer] 클러스터 조회 오류 (무시됨): {e}")
+
+    # ── 민원 또는 클러스터 없는 경우 ─────────────────────────────────────
     return {
         "session_id": req.session_id,
-        "stage": "improving",
+        "stage": "aggregated",
         "classification": classification,
-        "draft_proposal": draft_dict,
-        "improvements": improvements_data,
-        "refine_questions": refine_questions,
-        "related_laws": laws[:5],
-        "similar_cases": cases,
-        # 서버리스용
+        "responsible_dept": responsible_dept,
+        "cluster_id": None,
+        "receipt_number": req.session_id[:8].upper(),
+        "expected_days": 14,
+        "trending_keywords": trending_keywords,
         "ctx": new_ctx,
     }
 

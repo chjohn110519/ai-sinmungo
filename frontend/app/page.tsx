@@ -10,6 +10,8 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 interface TrendingKeyword {
   keyword: string
   total_count: number
+  cluster_id?: string | null
+  topic?: string | null
 }
 
 export default function Home() {
@@ -93,7 +95,13 @@ export default function Home() {
                       <span className="text-xs font-bold text-gray-400 w-4 flex-shrink-0">{i + 1}</span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between mb-1">
+                          {item.cluster_id ? (
+                          <Link href={`/cluster/${item.cluster_id}`} className="text-sm font-medium text-blue-700 hover:underline truncate">
+                            {item.keyword}
+                          </Link>
+                        ) : (
                           <span className="text-sm font-medium text-gray-800 truncate">{item.keyword}</span>
+                        )}
                           <span className="text-xs text-gray-500 ml-2 flex-shrink-0">{item.total_count}</span>
                         </div>
                         <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">

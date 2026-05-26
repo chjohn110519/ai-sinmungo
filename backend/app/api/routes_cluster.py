@@ -57,19 +57,35 @@ async def list_clusters(
 
 @router.get("/clusters/trending-keywords")
 async def get_trending_keywords(
-    limit: int = Query(5, ge=1, le=20),
+    limit: int = Query(10, ge=1, le=30),
     db: DBSession = Depends(get_db),
 ):
-    """클러스터 키워드를 count 가중치로 집계한 인기 키워드 TOP N."""
+    """클러스터 키워드를 count 가중치로 집계한 인기 키워드 TOP N (cluster_id 포함)."""
     clusters = db.query(ProposalCluster).all()
     keyword_weights: dict[str, int] = {}
+    keyword_best: dict[str, dict] = {}  # kw → {cluster_id, topic, count}
+
     for c in clusters:
         for kw in (c.keywords or []):
             keyword_weights[kw] = keyword_weights.get(kw, 0) + c.count
+            prev = keyword_best.get(kw)
+            if prev is None or c.count > prev["count"]:
+                keyword_best[kw] = {
+                    "cluster_id": c.cluster_id,
+                    "topic": c.topic,
+                    "count": c.count,
+                }
+
     trending = sorted(keyword_weights.items(), key=lambda x: x[1], reverse=True)[:limit]
     return {
         "trending_keywords": [
-            {"keyword": kw, "total_count": cnt} for kw, cnt in trending
+            {
+                "keyword": kw,
+                "total_count": cnt,
+                "cluster_id": keyword_best.get(kw, {}).get("cluster_id"),
+                "topic": keyword_best.get(kw, {}).get("topic"),
+            }
+            for kw, cnt in trending
         ]
     }
 
