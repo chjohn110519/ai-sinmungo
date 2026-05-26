@@ -268,7 +268,7 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
             print(f"[Cluster] 배정 실패 (무시됨): {e}")
 
     # 명확화 질문 생성
-    questions = _questioner.generate(full_message, routing.classification, n=5)
+    questions = await _questioner.generate(full_message, routing.classification, n=5)
 
     ctx = {
         "stage": "questioning",

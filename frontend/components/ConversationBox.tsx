@@ -127,6 +127,7 @@ export default function ConversationBox() {
   const [isLoading, setIsLoading] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
+  const [answerRecordingIdx, setAnswerRecordingIdx] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // Stage-specific state
@@ -370,6 +371,65 @@ export default function ConversationBox() {
     }
   }
 
+  // ── 답변 텍스트에어리어용 음성 녹음 ──────────────────────────────────────────
+  async function toggleAnswerRecording(idx: number) {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop()
+      setIsRecording(false)
+      setAnswerRecordingIdx(null)
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = ['audio/webm', 'audio/ogg', 'audio/mp4', ''].find(
+        m => m === '' || MediaRecorder.isTypeSupported(m)
+      ) ?? ''
+      const mr = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream)
+      audioChunksRef.current = []
+      mr.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
+      mr.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop())
+        if (audioChunksRef.current.length === 0) {
+          setError('녹음된 음성이 없습니다. 다시 시도해 주세요.')
+          setAnswerRecordingIdx(null)
+          return
+        }
+        const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || 'audio/webm' })
+        const ext = (mr.mimeType || 'audio/webm').includes('mp4') ? 'mp4'
+          : (mr.mimeType || '').includes('ogg') ? 'ogg' : 'webm'
+        const formData = new FormData()
+        formData.append('audio', blob, `recording.${ext}`)
+        setIsTranscribing(true)
+        try {
+          const res = await fetch(`${API_BASE}/api/voice/transcribe`, { method: 'POST', body: formData })
+          if (res.ok) {
+            const data = await res.json()
+            setAnswers(prev => ({
+              ...prev,
+              [idx]: (prev[idx] ? prev[idx] + ' ' : '') + data.transcript,
+            }))
+          } else {
+            const err = await res.json().catch(() => ({ detail: '음성 인식 실패' }))
+            setError(err.detail || '음성 인식에 실패했습니다.')
+          }
+        } catch {
+          setError('음성 인식 서버에 연결할 수 없습니다.')
+        } finally {
+          setIsTranscribing(false)
+          setAnswerRecordingIdx(null)
+        }
+      }
+      mr.start(250)
+      mediaRecorderRef.current = mr
+      setIsRecording(true)
+      setAnswerRecordingIdx(idx)
+    } catch {
+      setError('마이크 접근 권한이 필요합니다.')
+    }
+  }
+
   function resetAll() {
     setStage('idle')
     setInput('')
@@ -563,13 +623,40 @@ export default function ConversationBox() {
                     {q.question}
                   </label>
                 </div>
-                <textarea
-                  value={answers[i] || ''}
-                  onChange={e => setAnswers(prev => ({ ...prev, [i]: e.target.value }))}
-                  placeholder={q.hint || '답변을 입력하세요 (선택)'}
-                  rows={2}
-                  className="w-full border border-gray-200 rounded-lg p-2.5 text-sm resize-none bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder:text-gray-400"
-                />
+                <div className="relative">
+                  <textarea
+                    value={answers[i] || ''}
+                    onChange={e => setAnswers(prev => ({ ...prev, [i]: e.target.value }))}
+                    placeholder={
+                      isTranscribing && answerRecordingIdx === i
+                        ? '음성 인식 중…'
+                        : isRecording && answerRecordingIdx === i
+                        ? '🎙 녹음 중… (버튼을 눌러 중지)'
+                        : q.hint || '답변을 입력하세요 (선택)'
+                    }
+                    rows={2}
+                    className="w-full border border-gray-200 rounded-lg p-2.5 pr-10 text-sm resize-none bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder:text-gray-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleAnswerRecording(i)}
+                    disabled={isRecording && answerRecordingIdx !== i}
+                    title={isRecording && answerRecordingIdx === i ? '녹음 중지' : '음성으로 답변'}
+                    className={`absolute right-2 bottom-2 p-1.5 rounded-full transition-colors disabled:opacity-30 ${
+                      isRecording && answerRecordingIdx === i
+                        ? 'bg-red-100 hover:bg-red-200'
+                        : 'hover:bg-gray-200'
+                    }`}
+                  >
+                    {isTranscribing && answerRecordingIdx === i ? (
+                      <Mic size={14} className="text-blue-500 animate-pulse" />
+                    ) : isRecording && answerRecordingIdx === i ? (
+                      <MicOff size={14} className="text-red-500" />
+                    ) : (
+                      <Mic size={14} className="text-gray-400" />
+                    )}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
