@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react'
 import Link from 'next/link'
-import { Send, Mic, MicOff, Download, CheckCircle, Circle, ChevronRight, FileText, Paperclip, X, Image as ImageIcon, Expand, Users } from 'lucide-react'
+import { Send, Mic, MicOff, Download, CheckCircle, Circle, ChevronRight, FileText, Paperclip, X, Image as ImageIcon, Expand, Users, AlertCircle } from 'lucide-react'
 import ClusterStatus from './ClusterStatus'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
@@ -42,6 +42,12 @@ interface Improvement {
   requires_info?: string
 }
 
+interface RefineQuestion {
+  question: string
+  source: string    // "improvement_1" | "weakness_0" 등
+  category: string
+}
+
 interface ImprovingState {
   session_id: string
   classification: string
@@ -54,6 +60,7 @@ interface ImprovingState {
     related_laws: string[]
   }
   improvements: Improvement[]
+  refine_questions: RefineQuestion[]
   related_laws: Array<{ title: string; snippet?: string }>
   ctx?: Ctx
 }
@@ -128,6 +135,8 @@ export default function ConversationBox() {
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [answerRecordingIdx, setAnswerRecordingIdx] = useState<number | null>(null)
+  const [refineAnswers, setRefineAnswers] = useState<Record<string, string>>({})
+  const [refineRecordingKey, setRefineRecordingKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // Stage-specific state
@@ -247,6 +256,7 @@ export default function ConversationBox() {
           session_id: improvingData.session_id,
           accepted_improvement_ids: Array.from(acceptedIds),
           user_note: userNote,
+          refine_answers: refineAnswers,
           ctx: improvingData.ctx,   // 서버리스용: 컨텍스트 전달
         }),
       })
@@ -430,6 +440,65 @@ export default function ConversationBox() {
     }
   }
 
+  // ── 보완 질문 텍스트에어리어용 음성 녹음 ────────────────────────────────────
+  async function toggleRefineRecording(key: string) {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop()
+      setIsRecording(false)
+      setRefineRecordingKey(null)
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = ['audio/webm', 'audio/ogg', 'audio/mp4', ''].find(
+        m => m === '' || MediaRecorder.isTypeSupported(m)
+      ) ?? ''
+      const mr = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream)
+      audioChunksRef.current = []
+      mr.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
+      mr.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop())
+        if (audioChunksRef.current.length === 0) {
+          setError('녹음된 음성이 없습니다. 다시 시도해 주세요.')
+          setRefineRecordingKey(null)
+          return
+        }
+        const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || 'audio/webm' })
+        const ext = (mr.mimeType || 'audio/webm').includes('mp4') ? 'mp4'
+          : (mr.mimeType || '').includes('ogg') ? 'ogg' : 'webm'
+        const formData = new FormData()
+        formData.append('audio', blob, `recording.${ext}`)
+        setIsTranscribing(true)
+        try {
+          const res = await fetch(`${API_BASE}/api/voice/transcribe`, { method: 'POST', body: formData })
+          if (res.ok) {
+            const data = await res.json()
+            setRefineAnswers(prev => ({
+              ...prev,
+              [key]: (prev[key] ? prev[key] + ' ' : '') + data.transcript,
+            }))
+          } else {
+            const err = await res.json().catch(() => ({ detail: '음성 인식 실패' }))
+            setError(err.detail || '음성 인식에 실패했습니다.')
+          }
+        } catch {
+          setError('음성 인식 서버에 연결할 수 없습니다.')
+        } finally {
+          setIsTranscribing(false)
+          setRefineRecordingKey(null)
+        }
+      }
+      mr.start(250)
+      mediaRecorderRef.current = mr
+      setIsRecording(true)
+      setRefineRecordingKey(key)
+    } catch {
+      setError('마이크 접근 권한이 필요합니다.')
+    }
+  }
+
   function resetAll() {
     setStage('idle')
     setInput('')
@@ -440,6 +509,8 @@ export default function ConversationBox() {
     setAnswers({})
     setAcceptedIds(new Set())
     setUserNote('')
+    setRefineAnswers({})
+    setRefineRecordingKey(null)
     setAttachments([])
     setError(null)
   }
@@ -748,6 +819,62 @@ export default function ConversationBox() {
                 )
               })}
             </div>
+
+            {/* 보완 질문 섹션 */}
+            {improvingData.refine_questions?.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-4">
+                <div>
+                  <h3 className="font-semibold text-amber-900 flex items-center gap-2 text-sm">
+                    <AlertCircle size={15} /> 제안서 완성을 위한 추가 질문
+                  </h3>
+                  <p className="text-xs text-amber-700 mt-0.5">아래 질문에 답변할수록 최종 제안서 품질이 높아집니다 (선택사항)</p>
+                </div>
+                {improvingData.refine_questions.map((q) => (
+                  <div key={q.source} className="space-y-1.5">
+                    <div className="flex items-start gap-2">
+                      <span className="flex-shrink-0 text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full font-medium">
+                        {q.category}
+                      </span>
+                      <label className="text-sm text-amber-900 leading-snug">{q.question}</label>
+                    </div>
+                    <div className="relative">
+                      <textarea
+                        value={refineAnswers[q.source] || ''}
+                        onChange={e => setRefineAnswers(prev => ({ ...prev, [q.source]: e.target.value }))}
+                        placeholder={
+                          isTranscribing && refineRecordingKey === q.source
+                            ? '음성 인식 중…'
+                            : isRecording && refineRecordingKey === q.source
+                            ? '🎙 녹음 중… (버튼을 눌러 중지)'
+                            : '답변을 입력하세요 (선택)'
+                        }
+                        rows={2}
+                        className="w-full border border-amber-200 rounded-lg p-2.5 pr-10 text-sm resize-none bg-white focus:outline-none focus:ring-2 focus:ring-amber-400 placeholder:text-amber-300"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => toggleRefineRecording(q.source)}
+                        disabled={isRecording && refineRecordingKey !== q.source}
+                        title={isRecording && refineRecordingKey === q.source ? '녹음 중지' : '음성으로 답변'}
+                        className={`absolute right-2 bottom-2 p-1.5 rounded-full transition-colors disabled:opacity-30 ${
+                          isRecording && refineRecordingKey === q.source
+                            ? 'bg-red-100 hover:bg-red-200'
+                            : 'hover:bg-amber-100'
+                        }`}
+                      >
+                        {isTranscribing && refineRecordingKey === q.source ? (
+                          <Mic size={14} className="text-blue-500 animate-pulse" />
+                        ) : isRecording && refineRecordingKey === q.source ? (
+                          <MicOff size={14} className="text-red-500" />
+                        ) : (
+                          <Mic size={14} className="text-amber-500" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="space-y-1.5 pt-1">
               <label className="text-sm font-medium text-gray-700">추가 요청사항 (선택)</label>

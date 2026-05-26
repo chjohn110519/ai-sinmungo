@@ -114,13 +114,36 @@ def generate_docx(
     doc.add_paragraph()
     _divider(doc)
 
+    # ── APMP: 핵심 메시지 (Win Theme) ───────────────────────────────────────────
+    win_theme = proposal.get("win_theme")
+    if win_theme:
+        wt_p = doc.add_paragraph()
+        wt_p.paragraph_format.left_indent = Cm(0.5)
+        wt_p.paragraph_format.space_before = Pt(4)
+        wt_p.paragraph_format.space_after = Pt(8)
+        wt_run = wt_p.add_run(f"💡 핵심 메시지: {win_theme}")
+        wt_run.bold = True
+        wt_run.font.size = Pt(11)
+        wt_run.font.color.rgb = RGBColor(0x1D, 0x4E, 0xD8)
+
+    # ── APMP: Executive Summary ──────────────────────────────────────────────────
+    executive_summary = proposal.get("executive_summary")
+    if executive_summary:
+        _heading(doc, "요약 (Executive Summary)")
+        _body(doc, executive_summary)
+        _divider(doc)
+
+    section_num = 1
+
     # ── 1. 제안 배경 ────────────────────────────────────────────────────────────
-    _heading(doc, "1. 제안 배경")
+    _heading(doc, f"{section_num}. 제안 배경")
+    section_num += 1
     _body(doc, proposal.get("background", "-"))
     _divider(doc)
 
-    # ── 2. 주요 내용 ────────────────────────────────────────────────────────────
-    _heading(doc, "2. 주요 요청 사항")
+    # ── 주요 요청 사항 ──────────────────────────────────────────────────────────
+    _heading(doc, f"{section_num}. 주요 요청 사항")
+    section_num += 1
     core = proposal.get("core_requests", "-")
     for line in core.split("\n"):
         line = line.strip()
@@ -131,8 +154,9 @@ def generate_docx(
             run.font.size = Pt(10.5)
     _divider(doc)
 
-    # ── 3. 기대 효과 ────────────────────────────────────────────────────────────
-    _heading(doc, "3. 기대 효과")
+    # ── 기대 효과 ───────────────────────────────────────────────────────────────
+    _heading(doc, f"{section_num}. 기대 효과")
+    section_num += 1
     effects = proposal.get("expected_effects", "-")
     for line in effects.split("\n"):
         line = line.strip()
@@ -143,8 +167,22 @@ def generate_docx(
             run.font.size = Pt(10.5)
     _divider(doc)
 
-    # ── 4. 관련 법령 ────────────────────────────────────────────────────────────
-    _heading(doc, "4. 관련 법령")
+    # ── APMP: 근거 데이터 (Proof Points) ────────────────────────────────────────
+    proof_points = proposal.get("proof_points")
+    if proof_points and isinstance(proof_points, list) and any(proof_points):
+        _heading(doc, f"{section_num}. 근거 데이터")
+        section_num += 1
+        for pt in proof_points:
+            if pt:
+                p = doc.add_paragraph(style="List Bullet")
+                p.paragraph_format.left_indent = Cm(1.0)
+                run = p.add_run(str(pt).lstrip("•-·").strip())
+                run.font.size = Pt(10.5)
+        _divider(doc)
+
+    # ── 관련 법령 ───────────────────────────────────────────────────────────────
+    _heading(doc, f"{section_num}. 관련 법령")
+    section_num += 1
     laws = proposal.get("related_laws", [])
     if laws:
         for law in laws:
@@ -156,9 +194,9 @@ def generate_docx(
         _body(doc, "관련 법령 없음")
     _divider(doc)
 
-    # ── 5. AI 분석 결과 ─────────────────────────────────────────────────────────
+    # ── AI 분석 결과 ────────────────────────────────────────────────────────────
     if analysis:
-        _heading(doc, "5. AI 분석 결과")
+        _heading(doc, f"{section_num}. AI 분석 결과")
 
         analysis_table = doc.add_table(rows=3, cols=2)
         analysis_table.style = "Table Grid"

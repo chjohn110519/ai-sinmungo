@@ -134,6 +134,7 @@ class FinalizeRequest(BaseModel):
     session_id: str
     accepted_improvement_ids: List[int]
     user_note: Optional[str] = None
+    refine_answers: Optional[Dict[str, str]] = None  # 보완 질문 답변
     # 프론트엔드가 answer 응답에서 받은 ctx를 그대로 전달 (서버리스용)
     ctx: Optional[Dict[str, Any]] = None
 
@@ -338,15 +339,15 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
     classification = ctx["classification"]
     responsible_dept = ctx["responsible_dept"]
 
-    # 문제 구조화
-    prob: StructuredProblem = _structurer.structure(combined_message, classification, responsible_dept)
+    # 문제 구조화 (async)
+    prob: StructuredProblem = await _structurer.structure(combined_message, classification, responsible_dept)
 
     # 법령 검색
     laws = _searcher.search_related_laws(prob, top_k=5)
     cases = _searcher.search_similar_cases(prob, top_k=3)
 
-    # 초안 제안서 생성
-    draft_proposal = _structurer.generate_proposal(combined_message, prob, responsible_dept)
+    # 초안 제안서 생성 (async)
+    draft_proposal = await _structurer.generate_proposal(combined_message, prob, responsible_dept)
     draft_dict = draft_proposal.model_dump()
     law_titles = [l.get("title", "") for l in laws if l.get("title")]
     existing = draft_dict.get("related_laws", [])
@@ -355,6 +356,30 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
     # 개선안 제안
     improvements = _improver.suggest(classification, draft_dict, answers_text, n=4)
     improvements_data = [imp.model_dump() for imp in improvements]
+
+    # ── 보완 질문 생성 ────────────────────────────────────────────────────
+    # 개선안의 requires_info + 리뷰 weaknesses → 사용자에게 추가로 물을 질문들
+    refine_questions = []
+    for imp in improvements:
+        if imp.requires_info:
+            refine_questions.append({
+                "question": imp.requires_info,
+                "source": f"improvement_{imp.id}",
+                "category": imp.category,
+            })
+    # 리뷰 weaknesses도 보완 질문으로 변환 (미리 계산)
+    try:
+        from app.schemas.proposal import PolicyProposal as PP
+        draft_obj = PP(**draft_dict)
+        quick_review = _reviewer.review(draft_obj)
+        for i, w in enumerate(quick_review.weaknesses or []):
+            refine_questions.append({
+                "question": f"{w} — 이 부분을 보완할 추가 정보가 있다면 알려주세요.",
+                "source": f"weakness_{i}",
+                "category": "보완",
+            })
+    except Exception as e:
+        print(f"[보완질문] 리뷰 생성 오류 (무시됨): {e}")
 
     new_ctx = {
         **ctx,
@@ -366,6 +391,7 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
         "similar_cases": cases,
         "draft_proposal": draft_dict,
         "improvements": improvements_data,
+        "refine_questions": refine_questions,
     }
 
     _try_save_session(db, req.session_id, "improving", new_ctx, "structured")
@@ -378,6 +404,7 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
         "classification": classification,
         "draft_proposal": draft_dict,
         "improvements": improvements_data,
+        "refine_questions": refine_questions,
         "related_laws": laws[:5],
         "similar_cases": cases,
         # 서버리스용
@@ -409,6 +436,15 @@ async def conversation_finalize(req: FinalizeRequest, db: DBSession = Depends(ge
 
     _try_save_message(db, req.session_id, "user",
         f"수락한 개선안: {req.accepted_improvement_ids}")
+
+    # 보완 질문 답변을 user_answers에 합산
+    if req.refine_answers:
+        refine_parts = [
+            f"보완답변({k}): {v}"
+            for k, v in req.refine_answers.items() if v and v.strip()
+        ]
+        if refine_parts:
+            user_answers = user_answers + "\n\n[보완 질문 답변]\n" + "\n".join(refine_parts)
 
     # 최종 제안서 재작성
     final_proposal = _improver.refine_proposal(
