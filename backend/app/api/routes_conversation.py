@@ -301,6 +301,7 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
         "cluster_threshold": cluster_threshold,
         "cluster_triggered": cluster_triggered,
         "questions": questions,
+        "original_message": req.message,  # 프론트에서 민원 요약 표시용
         "ctx": ctx,
     }
 
@@ -316,10 +317,19 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
     else:
         ctx = _get_ctx_from_db(db, req.session_id, "questioning")
 
-    questions: list[str] = ctx.get("questions", [])
+    questions: list = ctx.get("questions", [])
+
+    def _q_text(idx: int) -> str:
+        """질문 항목에서 텍스트 추출 (str 또는 {"question": ...} dict 모두 처리)."""
+        if idx >= len(questions):
+            return ""
+        item = questions[idx]
+        if isinstance(item, dict):
+            return item.get("question", "")
+        return str(item)
 
     answers_text = "\n".join(
-        f"Q{int(k)+1}. {questions[int(k)] if int(k) < len(questions) else ''}  \nA. {v}"
+        f"Q{int(k)+1}. {_q_text(int(k))}  \nA. {v}"
         for k, v in sorted(req.answers.items(), key=lambda x: int(x[0]))
     )
     _try_save_message(db, req.session_id, "user", answers_text)

@@ -13,12 +13,18 @@ type Stage = 'idle' | 'questioning' | 'improving' | 'complete'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Ctx = Record<string, any>
 
+interface ClarifyingQuestion {
+  question: string
+  hint: string
+}
+
 interface QuestioningState {
   session_id: string
   classification: string
   responsible_dept: string
   confidence: number
-  questions: string[]
+  questions: ClarifyingQuestion[]
+  original_message?: string
   topic?: string
   keywords?: string[]
   cluster_id?: string | null
@@ -529,25 +535,40 @@ export default function ConversationBox() {
             />
           )}
 
+          {/* 접수한 민원 요약 */}
+          {questioningData.original_message && (
+            <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3">
+              <p className="text-xs font-semibold text-blue-500 mb-1">📋 접수한 내용</p>
+              <p className="text-sm text-blue-800 line-clamp-2 leading-relaxed">
+                {questioningData.original_message}
+              </p>
+            </div>
+          )}
+
           <div>
             <h2 className="text-base font-semibold text-gray-800 mb-1">
-              제안서 품질을 높이기 위해 몇 가지 여쭤볼게요
+              내용을 바탕으로 몇 가지 여쭤볼게요
             </h2>
-            <p className="text-sm text-gray-500">모든 질문에 답변하지 않아도 됩니다.</p>
+            <p className="text-sm text-gray-500">답변할수록 제안서 품질이 높아집니다. 모르는 항목은 건너뛰세요.</p>
           </div>
 
-          <div className="space-y-4">
+          <div className="space-y-3">
             {questioningData.questions.map((q, i) => (
-              <div key={i} className="space-y-1.5">
-                <label className="text-sm font-medium text-gray-700">
-                  Q{i + 1}. {q}
-                </label>
+              <div key={i} className="bg-gray-50 rounded-xl border border-gray-100 p-4 space-y-2">
+                <div className="flex items-start gap-2.5">
+                  <span className="flex-shrink-0 w-5 h-5 bg-blue-600 text-white rounded-full text-xs flex items-center justify-center font-bold mt-0.5">
+                    {i + 1}
+                  </span>
+                  <label className="text-sm font-medium text-gray-800 leading-snug">
+                    {q.question}
+                  </label>
+                </div>
                 <textarea
                   value={answers[i] || ''}
                   onChange={e => setAnswers(prev => ({ ...prev, [i]: e.target.value }))}
-                  placeholder="답변을 입력하세요 (선택)"
+                  placeholder={q.hint || '답변을 입력하세요 (선택)'}
                   rows={2}
-                  className="w-full border border-gray-300 rounded-lg p-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full border border-gray-200 rounded-lg p-2.5 text-sm resize-none bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder:text-gray-400"
                 />
               </div>
             ))}
