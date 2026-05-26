@@ -120,6 +120,7 @@ export default function ConversationBox() {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Stage-specific state
@@ -317,23 +318,45 @@ export default function ConversationBox() {
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+
+      // 브라우저별 지원 mimeType 자동 선택 (Safari는 audio/webm 미지원)
+      const mimeType = ['audio/webm', 'audio/ogg', 'audio/mp4', ''].find(
+        m => m === '' || MediaRecorder.isTypeSupported(m)
+      ) ?? ''
+      const mr = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream)
+
       audioChunksRef.current = []
-      mr.ondataavailable = e => audioChunksRef.current.push(e.data)
+      mr.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
       mr.onstop = async () => {
         stream.getTracks().forEach(t => t.stop())
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        if (audioChunksRef.current.length === 0) {
+          setError('녹음된 음성이 없습니다. 다시 시도해 주세요.')
+          return
+        }
+        const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || 'audio/webm' })
+        const ext = (mr.mimeType || 'audio/webm').includes('mp4') ? 'mp4'
+          : (mr.mimeType || '').includes('ogg') ? 'ogg' : 'webm'
         const formData = new FormData()
-        formData.append('audio', blob, 'recording.webm')
+        formData.append('audio', blob, `recording.${ext}`)
+        setIsTranscribing(true)
         try {
           const res = await fetch(`${API_BASE}/api/voice/transcribe`, { method: 'POST', body: formData })
           if (res.ok) {
             const data = await res.json()
             setInput(prev => prev + (prev ? ' ' : '') + data.transcript)
+          } else {
+            const err = await res.json().catch(() => ({ detail: '음성 인식 실패' }))
+            setError(err.detail || '음성 인식에 실패했습니다.')
           }
-        } catch {}
+        } catch {
+          setError('음성 인식 서버에 연결할 수 없습니다.')
+        } finally {
+          setIsTranscribing(false)
+        }
       }
-      mr.start()
+      mr.start(250) // 250ms마다 ondataavailable 발생 (청크 누락 방지)
       mediaRecorderRef.current = mr
       setIsRecording(true)
     } catch {
@@ -449,10 +472,18 @@ export default function ConversationBox() {
               accept=".pdf,.doc,.docx,.txt,image/*" />
             <button
               onClick={toggleRecording}
-              className={`p-2 rounded-lg border ${isRecording ? 'bg-red-500 text-white border-red-500 animate-pulse' : 'text-gray-500 hover:bg-gray-100 border-gray-200'}`}
-              title={isRecording ? '녹음 중지' : '음성 입력'}
+              disabled={isTranscribing}
+              className={`p-2 rounded-lg border transition-colors ${
+                isRecording ? 'bg-red-500 text-white border-red-500 animate-pulse'
+                : isTranscribing ? 'bg-blue-100 text-blue-500 border-blue-200'
+                : 'text-gray-500 hover:bg-gray-100 border-gray-200'
+              }`}
+              title={isRecording ? '녹음 중지' : isTranscribing ? '음성 변환 중...' : '음성 입력'}
             >
-              {isRecording ? <MicOff size={18} /> : <Mic size={18} />}
+              {isTranscribing
+                ? <span className="text-xs font-medium px-0.5">변환중</span>
+                : isRecording ? <MicOff size={18} /> : <Mic size={18} />
+              }
             </button>
             <div className="flex-1" />
             <button
