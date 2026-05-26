@@ -329,7 +329,7 @@ export default function ConversationBox() {
           const res = await fetch(`${API_BASE}/api/voice/transcribe`, { method: 'POST', body: formData })
           if (res.ok) {
             const data = await res.json()
-            setInput(prev => prev + (prev ? ' ' : '') + data.text)
+            setInput(prev => prev + (prev ? ' ' : '') + data.transcript)
           }
         } catch {}
       }

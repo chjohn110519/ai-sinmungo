@@ -5,6 +5,8 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session as DBSession
 
@@ -32,7 +34,7 @@ ALLOWED_TYPES = {
 @router.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
-    session_id: str = Form(...),
+    session_id: Optional[str] = Form(None),
     db: DBSession = Depends(get_db),
 ):
     """파일 업로드 및 텍스트 추출.
@@ -51,13 +53,6 @@ async def upload_file(
     if len(data) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="파일 크기는 20MB를 초과할 수 없습니다.")
 
-    # 세션 확인 (없으면 생성)
-    session = db.get(SessionModel, session_id)
-    if session is None:
-        session = SessionModel(session_id=session_id, user_input_mode="text", status="in_progress")
-        db.add(session)
-        db.commit()
-
     # 저장
     attachment_id = str(uuid.uuid4())
     safe_name = f"{attachment_id}_{file.filename or 'file'}"
@@ -67,17 +62,25 @@ async def upload_file(
     # 텍스트 추출
     extracted = extract_text(data, content_type, file.filename or "")
 
-    db_att = Attachment(
-        attachment_id=attachment_id,
-        session_id=session_id,
-        filename=file.filename or "파일",
-        content_type=content_type,
-        file_size=len(data),
-        extracted_text=extracted,
-        storage_path=str(save_path),
-    )
-    db.add(db_att)
-    db.commit()
+    # session_id가 있을 때만 DB에 저장 (없으면 텍스트 추출 결과만 반환)
+    if session_id:
+        session = db.get(SessionModel, session_id)
+        if session is None:
+            session = SessionModel(session_id=session_id, user_input_mode="text", status="in_progress")
+            db.add(session)
+            db.commit()
+
+        db_att = Attachment(
+            attachment_id=attachment_id,
+            session_id=session_id,
+            filename=file.filename or "파일",
+            content_type=content_type,
+            file_size=len(data),
+            extracted_text=extracted,
+            storage_path=str(save_path),
+        )
+        db.add(db_att)
+        db.commit()
 
     return {
         "attachment_id": attachment_id,
