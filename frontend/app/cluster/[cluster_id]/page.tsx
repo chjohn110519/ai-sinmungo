@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { Users, TrendingUp, CheckCircle, ArrowLeft, FileText, Clock } from 'lucide-react'
+import { Users, TrendingUp, CheckCircle, ArrowLeft, FileText, Clock, ChevronDown, ChevronUp, MessageSquare } from 'lucide-react'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 
@@ -22,22 +22,87 @@ interface ClusterData {
   updated_at: string | null
 }
 
+interface Opinion {
+  session_id: string
+  created_at: string | null
+  message: string
+  classification: string | null
+  proposal_title: string | null
+}
+
+const CLASS_COLOR: Record<string, string> = {
+  민원: 'bg-orange-100 text-orange-700',
+  제안: 'bg-blue-100 text-blue-700',
+  청원: 'bg-purple-100 text-purple-700',
+}
+
+function OpinionCard({ op }: { op: Opinion }) {
+  const [expanded, setExpanded] = useState(false)
+  const isLong = op.message.length > 100
+  const preview = isLong && !expanded ? op.message.slice(0, 100) + '…' : op.message
+
+  return (
+    <div className="bg-gray-50 rounded-xl border border-gray-200 p-4 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs text-gray-400">#{op.session_id}</span>
+          {op.classification && (
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${CLASS_COLOR[op.classification] ?? 'bg-gray-100 text-gray-600'}`}>
+              {op.classification}
+            </span>
+          )}
+        </div>
+        {op.created_at && (
+          <span className="text-xs text-gray-400 flex-shrink-0">
+            {new Date(op.created_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+          </span>
+        )}
+      </div>
+      {op.message ? (
+        <div>
+          <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{preview}</p>
+          {isLong && (
+            <button
+              onClick={() => setExpanded(v => !v)}
+              className="mt-1 flex items-center gap-1 text-xs text-blue-600 hover:underline"
+            >
+              {expanded ? <><ChevronUp size={12} /> 접기</> : <><ChevronDown size={12} /> 더 보기</>}
+            </button>
+          )}
+        </div>
+      ) : (
+        <p className="text-xs text-gray-400 italic">내용 없음</p>
+      )}
+      {op.proposal_title && (
+        <p className="text-xs text-gray-500">📄 제안서: {op.proposal_title}</p>
+      )}
+    </div>
+  )
+}
+
 export default function ClusterPage() {
   const params = useParams()
   const clusterId = params?.cluster_id as string
 
   const [cluster, setCluster] = useState<ClusterData | null>(null)
+  const [opinions, setOpinions] = useState<Opinion[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!clusterId) return
-    fetch(`${API_BASE}/api/cluster/${clusterId}`)
-      .then(r => {
-        if (!r.ok) throw new Error('클러스터 정보를 불러올 수 없습니다.')
-        return r.json()
+
+    Promise.all([
+      fetch(`${API_BASE}/api/cluster/${clusterId}`)
+        .then(r => { if (!r.ok) throw new Error('클러스터 정보를 불러올 수 없습니다.'); return r.json() }),
+      fetch(`${API_BASE}/api/cluster/${clusterId}/opinions`)
+        .then(r => r.ok ? r.json() : { opinions: [] })
+        .catch(() => ({ opinions: [] })),
+    ])
+      .then(([clusterData, opData]) => {
+        setCluster(clusterData)
+        setOpinions(opData.opinions || [])
       })
-      .then(setCluster)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [clusterId])
@@ -169,6 +234,27 @@ export default function ClusterPage() {
               </span>
             ))}
           </div>
+        </div>
+
+        {/* 제출된 의견 목록 */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <MessageSquare size={16} className="text-blue-600" />
+              <h3 className="font-bold text-gray-900">제출된 의견</h3>
+            </div>
+            <span className="text-xs text-gray-500">{opinions.length}건</span>
+          </div>
+
+          {opinions.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-4">아직 개별 의견 데이터가 없습니다.</p>
+          ) : (
+            <div className="space-y-3">
+              {opinions.map((op, i) => (
+                <OpinionCard key={i} op={op} />
+              ))}
+            </div>
+          )}
         </div>
 
         {/* 참여 안내 */}

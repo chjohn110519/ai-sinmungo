@@ -90,6 +90,36 @@ async def get_trending_keywords(
     }
 
 
+@router.get("/cluster/{cluster_id}/opinions")
+async def get_cluster_opinions(cluster_id: str, db: DBSession = Depends(get_db)):
+    """클러스터에 속한 의견 목록 조회 (최신순, 최대 50건)."""
+    from app.storage.models import Session as SessionModel, StructuredProposal
+
+    sessions = (
+        db.query(SessionModel)
+        .filter(SessionModel.cluster_id == cluster_id)
+        .order_by(SessionModel.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    opinions = []
+    for s in sessions:
+        ctx = s.conversation_context or {}
+        proposal = (
+            db.query(StructuredProposal)
+            .filter(StructuredProposal.session_id == s.session_id)
+            .first()
+        )
+        opinions.append({
+            "session_id": s.session_id[:8],
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+            "message": (ctx.get("initial_message") or "")[:300],
+            "classification": s.final_classification,
+            "proposal_title": proposal.title if proposal else None,
+        })
+    return {"cluster_id": cluster_id, "total": len(opinions), "opinions": opinions}
+
+
 @router.get("/clusters/pending-triggers")
 async def get_pending_triggers(db: DBSession = Depends(get_db)):
     """임계치 초과했지만 아직 문서가 생성되지 않은 클러스터 목록."""

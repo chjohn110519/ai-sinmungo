@@ -23,7 +23,6 @@ interface ProposalData {
   analysis: {
     pass_probability: number | null
     expected_duration_days: number | null
-    feasibility_score: number | null
   } | null
 }
 
@@ -68,9 +67,6 @@ export default function ProposalPage() {
     ? Math.round(proposal.analysis.pass_probability * 100)
     : null
   const durationDays = proposal.analysis?.expected_duration_days ?? null
-  const feasibility = proposal.analysis?.feasibility_score != null
-    ? Math.round(proposal.analysis.feasibility_score * 100)
-    : null
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-white via-blue-50 to-gray-50">
@@ -122,9 +118,9 @@ export default function ProposalPage() {
           </div>
         )}
 
-        {/* 분석 수치 */}
-        {proposal.analysis && (
-          <div className="grid grid-cols-3 gap-4">
+        {/* 분석 수치 — 통과 예측 + 예상 소요일 */}
+        {proposal.analysis && (passPct !== null || durationDays !== null) && (
+          <div className="grid grid-cols-2 gap-4">
             {passPct !== null && (
               <div className="bg-white rounded-2xl border border-gray-200 p-4 text-center shadow-sm">
                 <TrendingUp size={20} className="text-blue-600 mx-auto mb-2" />
@@ -137,13 +133,6 @@ export default function ProposalPage() {
                 <Clock size={20} className="text-amber-500 mx-auto mb-2" />
                 <div className="text-2xl font-bold text-gray-900">{durationDays}</div>
                 <div className="text-xs text-gray-500 mt-1">예상 소요일</div>
-              </div>
-            )}
-            {feasibility !== null && (
-              <div className="bg-white rounded-2xl border border-gray-200 p-4 text-center shadow-sm">
-                <CheckCircle size={20} className="text-green-600 mx-auto mb-2" />
-                <div className="text-2xl font-bold text-gray-900">{feasibility}%</div>
-                <div className="text-xs text-gray-500 mt-1">타당성 점수</div>
               </div>
             )}
           </div>
