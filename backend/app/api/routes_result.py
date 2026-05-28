@@ -35,6 +35,10 @@ async def get_session_result(session_id: str, db: Session = Depends(get_db)):
                 for r in raw
             ]
 
+    # 초안 분석 수치 (answer 단계에서 저장, before/after 비교용)
+    session_ctx = session.conversation_context or {}
+    draft_analysis = session_ctx.get("draft_analysis")
+
     return {
         "session": {
             "session_id": session.session_id,
@@ -57,4 +61,5 @@ async def get_session_result(session_id: str, db: Session = Depends(get_db)):
             "feasibility_score": analysis.feasibility_score,
             "visualization_data": vis_data,  # committee_recommendations 포함
         } if analysis else None,
+        "draft_analysis": draft_analysis,   # 초안 수치 — before/after 비교용
     }

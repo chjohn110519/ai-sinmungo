@@ -26,6 +26,10 @@ interface SessionResult {
       committee_recommendations?: Array<{ committee: string; relevance: number }>
     }
   } | null
+  draft_analysis?: {
+    pass_probability: number
+    expected_duration_days: number
+  } | null
   review?: { validity_score: number; strengths: string[]; weaknesses: string[] } | null
   download_url?: string | null
 }
@@ -314,6 +318,51 @@ export default function ResultPage() {
                 <ul className="text-sm text-gray-700 space-y-0.5">{review.weaknesses.map((w, i) => <li key={i}>△ {w}</li>)}</ul>
               </div>
             )}
+          </div>
+        )}
+
+        {/* AI 개선 효과 비교 카드 */}
+        {result.draft_analysis && analysis && (
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-200 p-5 shadow-sm space-y-3">
+            <h2 className="font-semibold text-blue-900">🤖 AI 개선 효과</h2>
+            <div className="grid grid-cols-2 gap-4">
+              {/* 통과 확률 비교 */}
+              <div className="bg-white rounded-xl p-4 space-y-2 border border-blue-100">
+                <p className="text-xs text-gray-500">통과 예측</p>
+                <div className="flex items-end gap-2">
+                  <span className="text-xl font-bold text-gray-400">
+                    {Math.round(result.draft_analysis.pass_probability * 100)}%
+                  </span>
+                  <span className="text-blue-500 text-sm mb-0.5">→</span>
+                  <span className="text-2xl font-bold text-emerald-600">
+                    {Math.round(analysis.pass_probability * 100)}%
+                  </span>
+                </div>
+                {analysis.pass_probability > result.draft_analysis.pass_probability && (
+                  <p className="text-xs text-emerald-600 font-medium">
+                    +{Math.round((analysis.pass_probability - result.draft_analysis.pass_probability) * 100)}%p 개선
+                  </p>
+                )}
+              </div>
+              {/* 예상 소요일 비교 */}
+              <div className="bg-white rounded-xl p-4 space-y-2 border border-blue-100">
+                <p className="text-xs text-gray-500">예상 소요일</p>
+                <div className="flex items-end gap-2">
+                  <span className="text-xl font-bold text-gray-400">
+                    {result.draft_analysis.expected_duration_days}일
+                  </span>
+                  <span className="text-blue-500 text-sm mb-0.5">→</span>
+                  <span className="text-2xl font-bold text-purple-600">
+                    {analysis.expected_duration_days}일
+                  </span>
+                </div>
+                {analysis.expected_duration_days < result.draft_analysis.expected_duration_days && (
+                  <p className="text-xs text-purple-600 font-medium">
+                    {result.draft_analysis.expected_duration_days - analysis.expected_duration_days}일 단축
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

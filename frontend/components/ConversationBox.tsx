@@ -283,6 +283,8 @@ export default function ConversationBox() {
           feasibility_score: data.analysis?.feasibility_score ?? 0,
           visualization_data: data.analysis?.visualization_data || { timeline: [] },
         },
+        // 초안 수치 — answer 단계에서 받아둔 analysis_preview를 우선 사용
+        draft_analysis: data.draft_analysis || improvingData?.analysis || null,
         review: data.review || null,
         download_url: data.download_url || null,
       }

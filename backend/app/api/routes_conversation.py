@@ -449,6 +449,7 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
         "draft_proposal": draft_dict,
         "docx_filename": docx_path.name,
         "improvements": improvements,
+        "draft_analysis": analysis_preview,   # 초안 분석 수치 — result 페이지 before/after 비교용
     }
 
     _try_save_session(db, req.session_id, "improving", new_ctx, "structured")
@@ -620,6 +621,7 @@ async def conversation_finalize(req: FinalizeRequest, db: DBSession = Depends(ge
         "final_proposal": final_proposal,
         "review": review.model_dump(),
         "analysis": analysis_dict,
+        "draft_analysis": ctx.get("draft_analysis"),   # 초안 수치 — before/after 비교용
         "similar_cases": similar_cases,
         "download_url": f"/api/session/{req.session_id}/download/docx",
         "docx_filename": docx_path.name,
