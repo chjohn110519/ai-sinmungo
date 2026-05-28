@@ -70,7 +70,10 @@ class LLM4Visualizer:
             ],
             "feasibility": feasibility_score,
             "pass_probability": pass_probability,
-            "committee_breakdown": committee_recs,  # 위원회 추천 리스트 (프론트 차트용)
+            "committee_recommendations": [           # 프론트 키명에 맞게 정규화 (committee, relevance)
+                {"committee": r["committee"], "relevance": r["confidence"]}
+                for r in committee_recs
+            ],
         }
 
         formatted_cases = []

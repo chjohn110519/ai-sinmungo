@@ -18,6 +18,23 @@ async def get_session_result(session_id: str, db: Session = Depends(get_db)):
     if proposal:
         analysis = db.query(AnalysisResult).filter(AnalysisResult.proposal_id == proposal.proposal_id).first()
 
+    # visualization_data 정규화:
+    # 과거 저장분은 'committee_breakdown' 키를 사용했으므로
+    # 프론트가 읽는 'committee_recommendations' (visualization_data 내부) 로 변환
+    vis_data: dict = {}
+    if analysis:
+        vis_data = dict(analysis.visualization_data or {})
+        if "committee_breakdown" in vis_data and "committee_recommendations" not in vis_data:
+            raw = vis_data.pop("committee_breakdown") or []
+            vis_data["committee_recommendations"] = [
+                {
+                    "committee": r.get("committee", ""),
+                    "relevance": r.get("confidence", r.get("relevance", 0)),
+                }
+                if isinstance(r, dict) else {"committee": str(r), "relevance": 0}
+                for r in raw
+            ]
+
     return {
         "session": {
             "session_id": session.session_id,
@@ -38,10 +55,6 @@ async def get_session_result(session_id: str, db: Session = Depends(get_db)):
             "pass_probability": analysis.pass_probability,
             "expected_duration_days": analysis.expected_duration_days,
             "feasibility_score": analysis.feasibility_score,
-            "visualization_data": analysis.visualization_data,
-            # committee_recommendations는 chart_data 안의 committee_breakdown으로 저장됨
-            "committee_recommendations": (
-                (analysis.visualization_data or {}).get("committee_breakdown") or []
-            ),
+            "visualization_data": vis_data,  # committee_recommendations 포함
         } if analysis else None,
     }
