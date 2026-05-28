@@ -172,6 +172,8 @@ export default function ComplaintsPage() {
           >
             <option value="">전체 상태</option>
             <option value="in_progress">처리 중</option>
+            <option value="classified">분류 완료</option>
+            <option value="structured">구조화 완료</option>
             <option value="completed">완료</option>
             <option value="failed">실패</option>
           </select>
