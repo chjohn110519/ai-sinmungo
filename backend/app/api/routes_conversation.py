@@ -287,12 +287,27 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
     # 명확화 질문 생성
     questions = await _questioner.generate(full_message, routing.classification, n=5)
 
+    # ── 위원회 분류 (TF-IDF 기반, KoBERT 불필요) ──────────────────────────────
+    start_committee_recs: list[dict] = []
+    top_committee: str = routing.responsible_dept
+    top_committee_confidence: float = routing.confidence
+    try:
+        from app.ml import get_registry as _get_registry
+        _reg = _get_registry()
+        start_committee_recs = _reg.recommend_committees(full_message, top_k=3)
+        if start_committee_recs:
+            top_committee = start_committee_recs[0]["committee"]
+            top_committee_confidence = start_committee_recs[0]["confidence"]
+    except Exception as _ce:
+        logger.warning("TURN1 위원회 분류 오류 (무시됨): %s", _ce)
+    # ─────────────────────────────────────────────────────────────────────────
+
     ctx = {
         "stage": "questioning",
         "initial_message": full_message,
         "classification": routing.classification,
-        "responsible_dept": routing.responsible_dept,
-        "confidence": routing.confidence,
+        "responsible_dept": top_committee,           # 위원회명으로 교체
+        "confidence": top_committee_confidence,      # 위원회 분류기 신뢰도로 교체
         "topic": routing.topic,
         "keywords": routing.keywords,
         "cluster_id": cluster_id,
@@ -303,14 +318,14 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
 
     _try_save_session(db, session_id, "questioning", ctx, "classified", routing.classification)
     _try_save_message(db, session_id, "assistant",
-        f"[{routing.classification}] 분류됨. 담당: {routing.responsible_dept}")
+        f"[{routing.classification}] 분류됨. 소관위원회: {top_committee}")
 
     return {
         "session_id": session_id,
         "stage": "questioning",
         "classification": routing.classification,
-        "responsible_dept": routing.responsible_dept,
-        "confidence": routing.confidence,
+        "responsible_dept": top_committee,           # 위원회명
+        "confidence": top_committee_confidence,      # 위원회 분류기 신뢰도
         "topic": routing.topic,
         "keywords": routing.keywords,
         "cluster_id": cluster_id,
@@ -319,6 +334,10 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
         "cluster_triggered": cluster_triggered,
         "questions": questions,
         "original_message": req.message,  # 프론트에서 민원 요약 표시용
+        "committee_recommendations": [            # TURN 1부터 위원회 후보 제공
+            {"committee": r["committee"], "relevance": r["confidence"]}
+            for r in start_committee_recs
+        ],
         "ctx": ctx,
     }
 
@@ -549,12 +568,17 @@ async def conversation_finalize(req: FinalizeRequest, db: DBSession = Depends(ge
     similar_cases = ctx.get("similar_cases", [])
     visual = _visualizer.visualize(proposal_obj, review, similar_cases, classification)
 
+    # 소관 위원회 → 담당부서 일치: 위원회 분류기 최상위 결과로 final_proposal 업데이트
+    chart = visual.chart_data or {}
+    if chart.get("top_committee"):
+        final_proposal["responsible_dept"] = chart["top_committee"]
+
     # DOCX 생성
     analysis_dict = {
         "feasibility_score": visual.feasibility_score,
         "pass_probability": visual.pass_probability,
         "expected_duration_days": visual.expected_duration_days,
-        "visualization_data": visual.chart_data or {},  # result 페이지 BarChart + 위원회 추천
+        "visualization_data": chart,  # result 페이지 BarChart + 위원회 추천 + stage_predictions
     }
     docx_path = generate_docx(final_proposal, classification, analysis_dict, req.session_id)
 

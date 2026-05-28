@@ -197,6 +197,23 @@ class ModelRegistry:
             logger.warning("pass_probability 예측 중 오류 (휴리스틱 사용): %s", exc)
             return None
 
+    def predict_pass_detailed(self, text: str) -> dict | None:
+        """
+        가결 확률 + 진행 단계 상세 예측을 반환한다.
+
+        Returns:
+            dict — {pass_probability, predicted_progress_stage, predicted_proc_result,
+                    predicted_cmt_result, predicted_law_result, top_progress_stages}
+            None — ML 모델 미사용 또는 오류
+        """
+        if self._approve_pred is None:
+            return None
+        try:
+            return self._approve_pred.predict_detailed(text)
+        except Exception as exc:
+            logger.warning("predict_pass_detailed 오류 (휴리스틱 사용): %s", exc)
+            return None
+
     def recommend_committees(self, text: str, top_k: int = 5) -> list[dict]:
         """
         위원회 후보 리스트를 반환한다.

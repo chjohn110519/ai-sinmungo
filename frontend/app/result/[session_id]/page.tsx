@@ -24,6 +24,13 @@ interface SessionResult {
     visualization_data: {
       timeline: Array<{ name: string; value: number }>
       committee_recommendations?: Array<{ committee: string; relevance: number }>
+      stage_predictions?: {
+        predicted_progress_stage: string
+        predicted_proc_result: string
+        predicted_cmt_result: string
+        predicted_law_result: string
+        top_progress_stages: Array<{ label: string; probability: number }>
+      } | null
     }
   } | null
   draft_analysis?: {
@@ -166,10 +173,11 @@ export default function ResultPage() {
   const { session, proposal, analysis, review, download_url } = result
   const canGenerateBill = ['제안', '청원'].includes(session.final_classification)
 
+  // 타당성 점수(feasibility_score) 제거 — 통과 확률만 표시
   const radialData = analysis ? [
-    { name: '실현 가능성', value: Math.round(analysis.feasibility_score * 100), fill: '#3b82f6' },
     { name: '통과 확률', value: Math.round(analysis.pass_probability * 100), fill: '#10b981' },
   ] : []
+  const stagePredictions = analysis?.visualization_data?.stage_predictions ?? null
 
   return (
     <div className="min-h-screen bg-gray-50 py-10 px-4">
@@ -369,32 +377,57 @@ export default function ResultPage() {
         {/* 분석 지표 */}
         {analysis && (
           <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-              <div className="bg-white rounded-2xl shadow-md p-5 text-center">
-                <p className="text-xs text-gray-500 mb-1">실현 가능성</p>
-                <p className="text-3xl font-bold text-blue-600">{Math.round(analysis.feasibility_score * 100)}%</p>
-              </div>
+            <div className="grid grid-cols-2 gap-4">
               <div className="bg-white rounded-2xl shadow-md p-5 text-center">
                 <p className="text-xs text-gray-500 mb-1">통과 확률</p>
                 <p className="text-3xl font-bold text-emerald-600">{Math.round(analysis.pass_probability * 100)}%</p>
               </div>
-              <div className="bg-white rounded-2xl shadow-md p-5 text-center col-span-2 sm:col-span-1">
+              <div className="bg-white rounded-2xl shadow-md p-5 text-center">
                 <p className="text-xs text-gray-500 mb-1">예상 소요 기간</p>
                 <p className="text-3xl font-bold text-purple-600">{analysis.expected_duration_days}일</p>
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-md p-6">
-              <h2 className="font-semibold text-gray-800 mb-4">실현 가능성 · 통과 확률</h2>
-              <ResponsiveContainer width="100%" height={220}>
-                <RadialBarChart cx="50%" cy="50%" innerRadius="30%" outerRadius="90%"
-                  data={radialData} startAngle={180} endAngle={0}>
-                  <RadialBar label={{ position: 'insideStart', fill: '#fff', fontSize: 12 }} dataKey="value" background />
-                  <Legend iconSize={10} layout="horizontal" verticalAlign="bottom" />
-                  <Tooltip formatter={(v: number) => `${v}%`} />
-                </RadialBarChart>
-              </ResponsiveContainer>
-            </div>
+            {/* 예상 처리 경로 (KoBERT 활성화 시) */}
+            {stagePredictions && (
+              <div className="bg-white rounded-2xl shadow-md p-6 space-y-4">
+                <h2 className="font-semibold text-gray-800">📋 예상 처리 경로</h2>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-full text-sm font-medium border border-blue-100">
+                    {stagePredictions.predicted_progress_stage}
+                  </span>
+                  <span className="text-gray-400 font-bold">→</span>
+                  <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-sm font-medium border border-emerald-100">
+                    {stagePredictions.predicted_proc_result}
+                  </span>
+                  {stagePredictions.predicted_cmt_result && (
+                    <>
+                      <span className="text-gray-400 font-bold">→</span>
+                      <span className="px-3 py-1.5 bg-purple-50 text-purple-700 rounded-full text-sm font-medium border border-purple-100">
+                        위원회: {stagePredictions.predicted_cmt_result}
+                      </span>
+                    </>
+                  )}
+                </div>
+                {stagePredictions.top_progress_stages.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-gray-500">단계별 예측 확률</p>
+                    {stagePredictions.top_progress_stages.slice(0, 4).map((s, i) => (
+                      <div key={i}>
+                        <div className="flex justify-between text-xs text-gray-600 mb-0.5">
+                          <span>{s.label}</span>
+                          <span>{Math.round(s.probability * 100)}%</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full"
+                            style={{ width: `${Math.round(s.probability * 100)}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {analysis.visualization_data?.timeline && (
               <div className="bg-white rounded-2xl shadow-md p-6">

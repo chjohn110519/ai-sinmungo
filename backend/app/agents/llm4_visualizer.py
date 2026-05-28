@@ -40,12 +40,20 @@ class LLM4Visualizer:
         proposal_text = f"{proposal.background}\n{proposal.core_requests}"
         registry = get_registry()
 
-        # pass_probability: ML 모델 사용, None 반환 시 휴리스틱으로 fallback
-        ml_prob = registry.predict_pass_probability(proposal_text)
-        if ml_prob is not None:
-            pass_probability = round(float(ml_prob), 3)
+        # pass_probability + 진행단계: predict_detailed() 우선 호출 (KoBERT 활성화 시)
+        stage_predictions: dict | None = None
+        detailed = registry.predict_pass_detailed(proposal_text)
+        if detailed is not None:
+            pass_probability = round(float(detailed["pass_probability"]), 3)
+            stage_predictions = {
+                "predicted_progress_stage": detailed["predicted_progress_stage"],
+                "predicted_proc_result": detailed["predicted_proc_result"],
+                "predicted_cmt_result": detailed["predicted_cmt_result"],
+                "predicted_law_result": detailed.get("predicted_law_result", ""),
+                "top_progress_stages": detailed.get("top_progress_stages", []),
+            }
         else:
-            # 기존 휴리스틱 (ML 미사용 환경 또는 오류 시)
+            # 기존 휴리스틱 fallback (KoBERT 비활성화 또는 오류 시)
             crowd_bonus = min(cluster_count / 1000.0, 0.15) if cluster_count > 0 else 0.0
             pass_probability = round(max(0.30, min(0.95, feasibility_score + crowd_bonus)), 3)
 
@@ -62,6 +70,9 @@ class LLM4Visualizer:
         legislation_days = int(expected_duration_days * 0.50)
         execution_days = expected_duration_days - review_days - legislation_days
 
+        # 소관 위원회 → 담당부서 일치: 위원회 분류기 최상위 결과로 responsible_dept 오버라이드
+        top_committee_name = committee_recs[0]["committee"] if committee_recs else None
+
         chart_data = {
             "timeline": [
                 {"name": "검토", "value": review_days},
@@ -74,6 +85,8 @@ class LLM4Visualizer:
                 {"committee": r["committee"], "relevance": r["confidence"]}
                 for r in committee_recs
             ],
+            "stage_predictions": stage_predictions,  # KoBERT 활성화 시 진행단계 예측
+            "top_committee": top_committee_name,      # 소관 위원회 최상위 추천
         }
 
         formatted_cases = []
