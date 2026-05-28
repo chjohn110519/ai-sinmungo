@@ -1,0 +1,41 @@
+# 빌드 캐시 / 임시 파일
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# 개발 환경
+.env
+.env.*
+!.env.example
+venv/
+.venv/
+env/
+
+# HuggingFace 모델 캐시 (Docker build 중 /app/.huggingface에 생성, COPY로 덮어쓰지 않도록)
+.huggingface/
+
+# 테스트 / CI
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 데이터 디렉토리 (런타임에 생성)
+data/
+chroma_db/
