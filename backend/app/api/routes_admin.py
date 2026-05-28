@@ -44,11 +44,12 @@ async def get_admin_stats(db: Session = Depends(get_db)):
         proposal = db.query(StructuredProposal).filter(
             StructuredProposal.session_id == s.session_id
         ).first()
+        cls = s.final_classification or (s.conversation_context or {}).get("classification")
         recent_list.append({
             "session_id": s.session_id,
             "created_at": s.created_at.isoformat() if s.created_at else None,
             "status": s.status,
-            "classification": s.final_classification,
+            "classification": cls,
             "proposal_title": proposal.title if proposal else None,
         })
 
@@ -74,18 +75,23 @@ async def list_sessions(
     classification: str = Query(None),
     db: Session = Depends(get_db),
 ):
-    """민원 목록 조회 (페이지네이션 + 필터)."""
+    """민원 목록 조회 (페이지네이션 + 필터).
+    classification은 final_classification → conversation_context['classification'] 순 폴백.
+    """
     query = db.query(SessionModel).order_by(desc(SessionModel.created_at))
     if status:
         query = query.filter(SessionModel.status == status)
-    if classification:
-        query = query.filter(SessionModel.final_classification == classification)
-
-    total = query.count()
-    sessions = query.offset((page - 1) * page_size).limit(page_size).all()
+    # classification 필터는 final_classification이 null인 경우를 놓치므로
+    # DB 레벨 필터 대신 Python 포스트 필터로 처리
+    all_sessions = query.all()
 
     items = []
-    for s in sessions:
+    for s in all_sessions:
+        # final_classification 없으면 conversation_context에서 폴백
+        cls = s.final_classification or (s.conversation_context or {}).get("classification")
+        # 분류 필터 적용 (포스트 필터)
+        if classification and cls != classification:
+            continue
         proposal = db.query(StructuredProposal).filter(
             StructuredProposal.session_id == s.session_id
         ).first()
@@ -93,16 +99,19 @@ async def list_sessions(
             "session_id": s.session_id,
             "created_at": s.created_at.isoformat() if s.created_at else None,
             "status": s.status,
-            "classification": s.final_classification,
+            "classification": cls,
             "proposal_title": proposal.title if proposal else None,
         })
+
+    total = len(items)
+    paginated = items[(page - 1) * page_size : page * page_size]
 
     return {
         "total": total,
         "page": page,
         "page_size": page_size,
-        "total_pages": (total + page_size - 1) // page_size,
-        "items": items,
+        "total_pages": max(1, (total + page_size - 1) // page_size),
+        "items": paginated,
     }
 
 
@@ -122,10 +131,11 @@ async def get_session_messages(session_id: str, db: Session = Depends(get_db)):
         .order_by(MessageModel.created_at)
         .all()
     )
+    cls = session.final_classification or (session.conversation_context or {}).get("classification")
     return {
         "session_id": session_id,
         "status": session.status,
-        "classification": session.final_classification,
+        "classification": cls,
         "messages": [
             {
                 "message_id": m.message_id,
