@@ -63,6 +63,7 @@ if _extra:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.vercel\.app",  # 모든 Vercel 배포 URL 허용
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
