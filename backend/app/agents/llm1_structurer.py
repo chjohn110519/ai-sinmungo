@@ -7,6 +7,7 @@ structure() / generate_proposal() 모두 async.
 from __future__ import annotations
 import json
 import logging
+import re
 from typing import Optional
 
 import httpx
@@ -36,6 +37,35 @@ def _get_api_key() -> str:
 
 def _get_model() -> str:
     return (settings.openai_model_name or "gpt-4o-mini").strip()
+
+
+# ── Q&A 형식 감지 + 정제 헬퍼 ────────────────────────────────────────────────
+
+def _is_qa_format(text: str) -> bool:
+    """combined_message 형태의 Q&A 포맷 감지."""
+    return "[추가 정보]" in text or bool(re.search(r"\bQ\d+\.", text))
+
+
+def _clean_qa_to_prose(user_input: str, structured_problem=None) -> str:
+    """Q&A combined_message에서 가독성 있는 prose 배경 생성.
+
+    [추가 정보] 이전의 원본 문장을 추출하고,
+    structured_problem 필드에서 원인·대상·해결 방향을 자연스러운 문장으로 조합한다.
+    """
+    original = user_input.split("[추가 정보]")[0].strip()
+    parts: list[str] = [original] if original else []
+    if structured_problem is not None:
+        cause = getattr(structured_problem, "cause", "") or ""
+        subjects = getattr(structured_problem, "affected_subjects", "") or ""
+        direction = getattr(structured_problem, "resolution_direction", "") or ""
+        # structured_problem의 cause가 user_input과 다를 때만 추가
+        if cause and cause not in (original, user_input):
+            parts.append(f"이 문제의 주요 원인은 {cause}입니다.")
+        if subjects and subjects not in ("일반국민",):
+            parts.append(f"주요 영향 대상은 {subjects}입니다.")
+        if direction and direction not in ("개선 필요",):
+            parts.append(f"해결 방향: {direction}")
+    return "\n\n".join(parts) if parts else (original or "제안 내용을 확인해 주세요.")
 
 
 class LLM1Structurer:
@@ -117,7 +147,7 @@ class LLM1Structurer:
         """구조화된 문제에서 APMP 방법론 기반 정책 제안서 생성."""
         api_key = _get_api_key()
         if not api_key:
-            return self._default_proposal(user_input, responsible_dept)
+            return self._default_proposal(user_input, responsible_dept, structured_problem)
 
         discriminators_str = ", ".join(structured_problem.discriminators or []) or "없음"
 
@@ -223,11 +253,34 @@ responsible_dept: "{responsible_dept}"
                 )
                 resp.raise_for_status()
             data = json.loads(resp.json()["choices"][0]["message"]["content"])
+
+            # ── 품질 검증: Q&A 형식 또는 너무 짧은 필드는 정제된 값으로 교체 ────────
+            bg = data.get("background") or ""
+            cr = data.get("core_requests") or ""
+            ee = data.get("expected_effects") or ""
+
+            if _is_qa_format(bg) or len(bg) < 80:
+                bg = _clean_qa_to_prose(user_input, structured_problem)
+                logger.info("LLM1: background 품질 미달 → Q&A 정제 prose로 교체")
+            if not cr or cr in ("개선 요청",):
+                cr = (
+                    "• 관련 제도 및 법령 정비\n"
+                    "• 담당 기관 내 전담 조직 구성\n"
+                    "• 이해관계자 지원 체계 마련"
+                )
+            if not ee or ee in ("정책 개선 및 국민 편의 증진",):
+                ee = (
+                    "• 문제 해소를 통한 국민 생활 개선\n"
+                    "• 관련 피해 감소\n"
+                    "• 행정 효율 및 정책 신뢰도 향상"
+                )
+            # ─────────────────────────────────────────────────────────────────────
+
             return PolicyProposal(
-                title=data.get("title", "제안서"),
-                background=data.get("background", user_input),
-                core_requests=data.get("core_requests", "개선 요청"),
-                expected_effects=data.get("expected_effects", "정책 개선 및 국민 편의 증진"),
+                title=data.get("title") or "정책 개선 제안",
+                background=bg,
+                core_requests=cr,
+                expected_effects=ee,
                 responsible_dept=data.get("responsible_dept", responsible_dept),
                 related_laws=data.get("related_laws", []),
                 executive_summary=data.get("executive_summary") or None,
@@ -236,14 +289,37 @@ responsible_dept: "{responsible_dept}"
             )
         except Exception as e:
             logger.warning("LLM1 generate_proposal 오류 (폴백): %s: %s", type(e).__name__, e)
-            return self._default_proposal(user_input, responsible_dept)
+            return self._default_proposal(user_input, responsible_dept, structured_problem)
 
-    def _default_proposal(self, user_input: str, responsible_dept: str) -> PolicyProposal:
+    def _default_proposal(
+        self,
+        user_input: str,
+        responsible_dept: str,
+        structured_problem=None,
+    ) -> PolicyProposal:
+        """LLM 호출 실패 시 최소한의 가독성을 갖춘 fallback 제안서 반환.
+
+        background: Q&A raw 텍스트 대신 structured_problem + 원문에서 prose 생성.
+        core_requests / expected_effects: 빈 문자열 대신 기본 bullet 3개 제공.
+        """
+        background = (
+            _clean_qa_to_prose(user_input, structured_problem)
+            if _is_qa_format(user_input)
+            else (user_input.strip() or "제안 내용을 확인해 주세요.")
+        )
         return PolicyProposal(
-            title="제안 법안",
-            background=user_input,
-            core_requests="개선 요청",
-            expected_effects="정책 개선 및 국민 편의 증진",
+            title="정책 개선 제안",
+            background=background,
+            core_requests=(
+                "• 관련 제도 및 법령 정비\n"
+                "• 담당 기관 내 전담 조직 구성\n"
+                "• 피해자·이해관계자 지원 체계 마련"
+            ),
+            expected_effects=(
+                "• 문제 해소를 통한 국민 생활 개선\n"
+                "• 관련 피해 및 불편 감소\n"
+                "• 정책 신뢰도 및 행정 효율 향상"
+            ),
             responsible_dept=responsible_dept,
             related_laws=[],
             executive_summary=None,

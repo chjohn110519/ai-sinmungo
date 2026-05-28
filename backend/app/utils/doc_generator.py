@@ -8,6 +8,7 @@ HWP는 오픈소스 라이브러리 미지원으로 DOCX를 제공하며,
 from __future__ import annotations
 
 import io
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -51,6 +52,20 @@ def _body(doc: Document, text: str) -> None:
     p.paragraph_format.space_after = Pt(6)
     for run in p.runs:
         run.font.size = Pt(10.5)
+
+
+def _sanitize_background(text: str) -> str:
+    """Q&A 마커([추가 정보], Q1., A.)를 제거하고 읽기 좋은 단락 텍스트로 반환.
+
+    combined_message 형태의 raw Q&A가 배경 필드에 들어온 경우를 DOCX 렌더링 직전에 방어한다.
+    """
+    if "[추가 정보]" in text:
+        main_part = text.split("[추가 정보]")[0].strip()
+        # Q&A 답변 텍스트만 추출
+        answers = re.findall(r"A\.\s*(.+?)(?=Q\d+\.|$)", text, re.DOTALL)
+        extra = " ".join(a.strip() for a in answers if a.strip())
+        return f"{main_part}\n\n{extra}".strip() if extra else main_part
+    return text
 
 
 def _divider(doc: Document) -> None:
@@ -138,7 +153,10 @@ def generate_docx(
     # ── 1. 제안 배경 ────────────────────────────────────────────────────────────
     _heading(doc, f"{section_num}. 제안 배경")
     section_num += 1
-    _body(doc, proposal.get("background", "-"))
+    bg_raw = proposal.get("background") or "-"
+    bg_clean = _sanitize_background(bg_raw)
+    for para in (p.strip() for p in bg_clean.split("\n\n") if p.strip()):
+        _body(doc, para)
     _divider(doc)
 
     # ── 주요 요청 사항 ──────────────────────────────────────────────────────────
