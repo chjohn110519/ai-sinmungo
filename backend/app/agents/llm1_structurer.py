@@ -68,6 +68,17 @@ def _clean_qa_to_prose(user_input: str, structured_problem=None) -> str:
     return "\n\n".join(parts) if parts else (original or "제안 내용을 확인해 주세요.")
 
 
+def _extract_json(text: str) -> dict:
+    """텍스트에서 JSON 블록 추출 (Anthropic 등 plain-text 응답 파싱용)."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r'\{.*\}', text, re.DOTALL)
+        if m:
+            return json.loads(m.group())
+        raise
+
+
 class LLM1Structurer:
     """정책 제안 입력을 구조화하고 정책 제안서를 생성하는 LLM 에이전트."""
 
@@ -76,11 +87,10 @@ class LLM1Structurer:
     async def structure(
         self, user_input: str, classification: str, responsible_dept: str
     ) -> StructuredProblem:
-        """사용자 입력을 구조화된 문제로 변환 (APMP Win Theme 추출 포함)."""
-        api_key = _get_api_key()
-        if not api_key:
-            return self._default_structured_problem(user_input)
+        """사용자 입력을 구조화된 문제로 변환 (APMP Win Theme 추출 포함).
 
+        OpenAI → Anthropic → 기본값 순으로 폴백.
+        """
         prompt = f"""다음 {classification} 내용을 분석하여 핵심 문제를 구조화하세요.
 
 입력: {user_input}
@@ -95,35 +105,31 @@ class LLM1Structurer:
   "discriminators": ["긴급성: 연간 ○만명 영향", "선례: ○○국 시행 성공", "법적 공백: 현행 ○○법 미규정"]
 }}"""
 
+        data: dict | None = None
+        # 1) OpenAI 시도
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                resp = await client.post(
-                    _OPENAI_URL,
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json={
-                        "model": _get_model(),
-                        "messages": [
-                            {"role": "system", "content": _STRUCTURE_SYSTEM},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "temperature": 0.3,
-                        "max_tokens": 800,
-                        "response_format": {"type": "json_object"},
-                    },
-                )
-                resp.raise_for_status()
-            data = json.loads(resp.json()["choices"][0]["message"]["content"])
-            return StructuredProblem(
-                cause=data.get("cause", user_input),
-                affected_subjects=data.get("affected_subjects", "일반국민"),
-                resolution_direction=data.get("resolution_direction", "개선 필요"),
-                keywords=data.get("keywords", ["민원", "정책", "제안"]),
-                win_theme=data.get("win_theme") or None,
-                discriminators=data.get("discriminators") or None,
-            )
-        except Exception as e:
-            logger.warning("LLM1 structure 오류 (폴백): %s: %s", type(e).__name__, e)
+            resp_text = await self._call_openai(_STRUCTURE_SYSTEM, prompt, max_tokens=800, temperature=0.3)
+            data = json.loads(resp_text)
+        except Exception as e1:
+            logger.warning("LLM1 structure OpenAI 실패, Anthropic 폴백: %s: %s", type(e1).__name__, e1)
+            # 2) Anthropic 폴백
+            try:
+                resp_text = await self._call_anthropic(_STRUCTURE_SYSTEM, prompt, max_tokens=800)
+                data = _extract_json(resp_text)
+            except Exception as e2:
+                logger.warning("LLM1 structure Anthropic도 실패 (기본값): %s: %s", type(e2).__name__, e2)
+
+        if data is None:
             return self._default_structured_problem(user_input)
+
+        return StructuredProblem(
+            cause=data.get("cause", user_input),
+            affected_subjects=data.get("affected_subjects", "일반국민"),
+            resolution_direction=data.get("resolution_direction", "개선 필요"),
+            keywords=data.get("keywords", ["민원", "정책", "제안"]),
+            win_theme=data.get("win_theme") or None,
+            discriminators=data.get("discriminators") or None,
+        )
 
     def _default_structured_problem(self, user_input: str) -> StructuredProblem:
         return StructuredProblem(
@@ -135,6 +141,52 @@ class LLM1Structurer:
             discriminators=None,
         )
 
+    # ── 공통 LLM 호출 헬퍼 ──────────────────────────────────────────────────
+
+    async def _call_openai(
+        self,
+        system: str,
+        prompt: str,
+        max_tokens: int,
+        temperature: float = 0.3,
+    ) -> str:
+        """OpenAI Chat Completions API 호출 (JSON mode). API key 없으면 RuntimeError."""
+        api_key = _get_api_key()
+        if not api_key:
+            raise RuntimeError("OpenAI API key 미설정")
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            resp = await client.post(
+                _OPENAI_URL,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": _get_model(),
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "response_format": {"type": "json_object"},
+                },
+            )
+            resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+
+    async def _call_anthropic(self, system: str, prompt: str, max_tokens: int) -> str:
+        """Anthropic Claude API 호출 (OpenAI 폴백용). API key 없으면 RuntimeError."""
+        ant_key = (settings.anthropic_api_key or "").strip()
+        if not ant_key:
+            raise RuntimeError("Anthropic API key 미설정")
+        import anthropic as _ant  # 지연 임포트
+        client = _ant.AsyncAnthropic(api_key=ant_key)
+        msg = await client.messages.create(
+            model=getattr(settings, "anthropic_model_name", None) or "claude-3-5-sonnet-20241022",
+            max_tokens=max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return msg.content[0].text
+
     # ── 제안서 생성 ──────────────────────────────────────────────────────────
 
     async def generate_proposal(
@@ -144,10 +196,10 @@ class LLM1Structurer:
         responsible_dept: str,
         web_context: list[dict] | None = None,
     ) -> PolicyProposal:
-        """구조화된 문제에서 APMP 방법론 기반 정책 제안서 생성."""
-        api_key = _get_api_key()
-        if not api_key:
-            return self._default_proposal(user_input, responsible_dept, structured_problem)
+        """구조화된 문제에서 APMP 방법론 기반 정책 제안서 생성.
+
+        OpenAI → Anthropic → 기본값 순으로 폴백.
+        """
 
         discriminators_str = ", ".join(structured_problem.discriminators or []) or "없음"
 
@@ -235,26 +287,22 @@ responsible_dept: "{responsible_dept}"
   "responsible_dept": "{responsible_dept}"
 }}"""
 
+        data: dict | None = None
+        # 1) OpenAI 시도
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                resp = await client.post(
-                    _OPENAI_URL,
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json={
-                        "model": _get_model(),
-                        "messages": [
-                            {"role": "system", "content": _GENERATE_SYSTEM},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "temperature": 0.4,
-                        "max_tokens": 3500,
-                        "response_format": {"type": "json_object"},
-                    },
-                )
-                resp.raise_for_status()
-            data = json.loads(resp.json()["choices"][0]["message"]["content"])
+            resp_text = await self._call_openai(_GENERATE_SYSTEM, prompt, max_tokens=3500, temperature=0.4)
+            data = json.loads(resp_text)
+        except Exception as e1:
+            logger.warning("LLM1 generate_proposal OpenAI 실패, Anthropic 폴백: %s: %s", type(e1).__name__, e1)
+            # 2) Anthropic 폴백
+            try:
+                resp_text = await self._call_anthropic(_GENERATE_SYSTEM, prompt, max_tokens=4096)
+                data = _extract_json(resp_text)
+            except Exception as e2:
+                logger.warning("LLM1 generate_proposal Anthropic도 실패 (기본값): %s: %s", type(e2).__name__, e2)
+                return self._default_proposal(user_input, responsible_dept, structured_problem)
 
-            # ── 품질 검증: Q&A 형식 또는 너무 짧은 필드는 정제된 값으로 교체 ────────
+        # ── 품질 검증: Q&A 형식 또는 너무 짧은 필드는 정제된 값으로 교체 ────────
             bg = data.get("background") or ""
             cr = data.get("core_requests") or ""
             ee = data.get("expected_effects") or ""
@@ -276,20 +324,17 @@ responsible_dept: "{responsible_dept}"
                 )
             # ─────────────────────────────────────────────────────────────────────
 
-            return PolicyProposal(
-                title=data.get("title") or "정책 개선 제안",
-                background=bg,
-                core_requests=cr,
-                expected_effects=ee,
-                responsible_dept=data.get("responsible_dept", responsible_dept),
-                related_laws=data.get("related_laws", []),
-                executive_summary=data.get("executive_summary") or None,
-                win_theme=data.get("win_theme") or None,
-                proof_points=data.get("proof_points") or None,
-            )
-        except Exception as e:
-            logger.warning("LLM1 generate_proposal 오류 (폴백): %s: %s", type(e).__name__, e)
-            return self._default_proposal(user_input, responsible_dept, structured_problem)
+        return PolicyProposal(
+            title=data.get("title") or "정책 개선 제안",
+            background=bg,
+            core_requests=cr,
+            expected_effects=ee,
+            responsible_dept=data.get("responsible_dept", responsible_dept),
+            related_laws=data.get("related_laws", []),
+            executive_summary=data.get("executive_summary") or None,
+            win_theme=data.get("win_theme") or None,
+            proof_points=data.get("proof_points") or None,
+        )
 
     def _default_proposal(
         self,

@@ -12,6 +12,7 @@ Stage 흐름:
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from pathlib import Path
 
@@ -44,6 +45,18 @@ from app.agents.llm_improver import LLMImprover, Improvement
 from app.schemas.proposal import StructuredProblem
 from app.utils.doc_generator import generate_docx
 from app.config import settings
+
+# ── 법령명 판별 헬퍼 ──────────────────────────────────────────────────────────
+_LAW_NAME_RE = re.compile(r"(법|령|규칙|조례|규정|기준|지침|고시|훈령|처분|명령)")
+
+
+def _is_law_name(title: str) -> bool:
+    """실제 한국 법령명인지 판별한다.
+
+    한국 법령명은 반드시 '법', '령', '규칙', '조례', '규정' 등을 포함한다.
+    ChromaDB가 반환하는 청원·제안 제목("아동 돌봄 공백 해소 제안" 등)을 필터링한다.
+    """
+    return bool(_LAW_NAME_RE.search(title))
 
 router = APIRouter()
 
@@ -87,7 +100,7 @@ async def _generate_cluster_proposal(db: DBSession, cluster: ProposalCluster) ->
         synthetic_msg, prob, cluster.responsible_dept, web_context=cluster_web_ctx
     )
     proposal_dict = draft.model_dump()
-    law_titles = [l.get("title", "") for l in laws if l.get("title")]
+    law_titles = [l.get("title", "") for l in laws if l.get("title") and _is_law_name(l.get("title", ""))]
     proposal_dict["related_laws"] = list(dict.fromkeys(
         proposal_dict.get("related_laws", []) + law_titles
     ))[:8]
@@ -396,7 +409,7 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
         combined_message, prob, responsible_dept, web_context=web_context
     )
     draft_dict = draft_proposal.model_dump()
-    law_titles = [l.get("title", "") for l in laws if l.get("title")]
+    law_titles = [l.get("title", "") for l in laws if l.get("title") and _is_law_name(l.get("title", ""))]
     existing_laws = draft_dict.get("related_laws", [])
     draft_dict["related_laws"] = list(dict.fromkeys(existing_laws + law_titles))[:8]
 
