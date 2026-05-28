@@ -115,16 +115,16 @@ export default function ComplaintsPage() {
     if (classFilter) params.set('classification', classFilter)
 
     fetch(`${API_BASE}/api/sessions?${params}`)
-      .then((r) => r.ok ? r.json() : null)
+      .then((r) => {
+        if (!r.ok) throw new Error('api_error')
+        return r.json()
+      })
       .then((apiData) => {
-        if (apiData && apiData.items?.length > 0) {
-          setData(apiData)
-        } else {
-          // Fallback to localStorage
-          setData(getLocalComplaints(statusFilter, classFilter, page))
-        }
+        // API 성공이면 빈 결과라도 그대로 사용 (데이터 소스 혼용 방지)
+        setData(apiData)
       })
       .catch(() => {
+        // API 자체 실패(네트워크 오류 / non-ok) 시에만 localStorage 폴백
         setData(getLocalComplaints(statusFilter, classFilter, page))
       })
       .finally(() => setLoading(false))
