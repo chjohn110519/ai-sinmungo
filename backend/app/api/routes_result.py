@@ -39,5 +39,9 @@ async def get_session_result(session_id: str, db: Session = Depends(get_db)):
             "expected_duration_days": analysis.expected_duration_days,
             "feasibility_score": analysis.feasibility_score,
             "visualization_data": analysis.visualization_data,
+            # committee_recommendations는 chart_data 안의 committee_breakdown으로 저장됨
+            "committee_recommendations": (
+                (analysis.visualization_data or {}).get("committee_breakdown") or []
+            ),
         } if analysis else None,
     }

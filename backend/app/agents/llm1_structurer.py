@@ -6,12 +6,15 @@ structure() / generate_proposal() 모두 async.
 
 from __future__ import annotations
 import json
+import logging
 from typing import Optional
 
 import httpx
 
 from app.schemas.proposal import StructuredProblem, PolicyProposal
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 _OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 _TIMEOUT = httpx.Timeout(connect=10.0, read=90.0, write=30.0, pool=10.0)
@@ -89,7 +92,7 @@ class LLM1Structurer:
                 discriminators=data.get("discriminators") or None,
             )
         except Exception as e:
-            print(f"[LLM1] structure 오류 (폴백): {type(e).__name__}: {e}")
+            logger.warning("LLM1 structure 오류 (폴백): %s: %s", type(e).__name__, e)
             return self._default_structured_problem(user_input)
 
     def _default_structured_problem(self, user_input: str) -> StructuredProblem:
@@ -232,7 +235,7 @@ responsible_dept: "{responsible_dept}"
                 proof_points=data.get("proof_points") or None,
             )
         except Exception as e:
-            print(f"[LLM1] generate_proposal 오류 (폴백): {type(e).__name__}: {e}")
+            logger.warning("LLM1 generate_proposal 오류 (폴백): %s: %s", type(e).__name__, e)
             return self._default_proposal(user_input, responsible_dept)
 
     def _default_proposal(self, user_input: str, responsible_dept: str) -> PolicyProposal:

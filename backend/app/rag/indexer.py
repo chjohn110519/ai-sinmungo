@@ -1,8 +1,10 @@
 from __future__ import annotations
+import logging
 from pathlib import Path
 import chromadb
-from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 SAMPLE_DOCUMENTS = [
     # ── 도로·교통 ──────────────────────────────────────────────────────────
@@ -113,10 +115,23 @@ SAMPLE_DOCUMENTS = [
 
 
 def _get_ef():
-    return OpenAIEmbeddingFunction(
-        api_key=settings.openai_api_key or "dummy",
-        model_name="text-embedding-3-small",
+    """임베딩 함수 반환.
+
+    openai_api_key가 설정된 경우: OpenAI text-embedding-3-small (1536 dims).
+    미설정 시: chromadb 기본 로컬 임베딩(all-MiniLM-L6-v2, 384 dims)으로 fallback.
+    """
+    if settings.openai_api_key:
+        from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+        return OpenAIEmbeddingFunction(
+            api_key=settings.openai_api_key,
+            model_name="text-embedding-3-small",
+        )
+    logger.warning(
+        "OPENAI_API_KEY 미설정 — 로컬 임베딩(all-MiniLM-L6-v2)으로 fallback. "
+        "검색 품질이 저하될 수 있습니다."
     )
+    from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+    return DefaultEmbeddingFunction()
 
 
 class RAGIndexer:
@@ -136,7 +151,7 @@ class RAGIndexer:
 
         existing_count = collection.count()
         if existing_count >= 50:
-            print(f"✓ RAG 컬렉션 이미 초기화됨: {existing_count}개 문서")
+            logger.info("RAG 컬렉션 이미 초기화됨: %d개 문서", existing_count)
             return collection
 
         try:
@@ -157,7 +172,7 @@ class RAGIndexer:
         ]
 
         collection.add(ids=ids, documents=documents, metadatas=metadatas)
-        print(f"✓ RAG 샘플 데이터 초기화 완료: {len(ids)}개 문서 저장됨")
+        logger.info("RAG 샘플 데이터 초기화 완료: %d개 문서 저장됨", len(ids))
         return collection
 
     def create_collection(self, name: str = "legal_documents"):

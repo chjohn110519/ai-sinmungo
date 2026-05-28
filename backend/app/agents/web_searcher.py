@@ -57,7 +57,7 @@ async def search(query: str, max_results: int = 5) -> list[dict]:
             })
         return results
     except Exception as e:
-        print(f"[WebSearch] 오류 (무시됨): {type(e).__name__}: {e}")
+        import logging; logging.getLogger(__name__).warning("WebSearch 오류 (무시됨): %s: %s", type(e).__name__, e)
         return []
 
 

@@ -5,11 +5,13 @@ API 키는 https://open.law.go.kr 에서 발급받아 .env에 LAW_API_KEY로 설
 """
 
 from __future__ import annotations
-
+import logging
 import httpx
 from typing import Optional
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 LAW_SEARCH_URL = "https://www.law.go.kr/DRF/lawSearch.do"
@@ -59,7 +61,7 @@ def search_laws(query: str, top_k: int = 5) -> list[dict]:
         return results
 
     except Exception as e:
-        print(f"[법령API] 검색 오류: {e}")
+        logger.warning("법령API 검색 오류: %s", e)
         return []
 
 
@@ -78,7 +80,7 @@ def get_law_detail(law_id: str) -> Optional[dict]:
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
-        print(f"[법령API] 상세 조회 오류: {e}")
+        logger.warning("법령API 상세 조회 오류: %s", e)
         return None
 
 
@@ -117,5 +119,5 @@ def search_precedents(query: str, top_k: int = 3) -> list[dict]:
             for p in precs[:top_k]
         ]
     except Exception as e:
-        print(f"[법령API] 판례 검색 오류: {e}")
+        logger.warning("법령API 판례 검색 오류: %s", e)
         return []

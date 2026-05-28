@@ -13,6 +13,7 @@ search 로 되돌아가서 법령 재검색 후 generate/review 반복.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TypedDict, Optional, List, AsyncIterator
 
 from langgraph.graph import StateGraph, END
@@ -25,6 +26,8 @@ from app.agents.llm4_visualizer import LLM4Visualizer
 from app.schemas.routing import RoutingResult
 from app.schemas.proposal import StructuredProblem, PolicyProposal, ProposalReview, VisualAnalysis
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 # ─── 공유 에이전트 인스턴스 ───────────────────────────────────────────────────
@@ -55,6 +58,33 @@ class PipelineState(TypedDict):
     processing_steps: List[str]
     errors: List[str]
     current_node: str            # 현재 실행 중인 노드 이름 (SSE용)
+
+
+# ─── 헬퍼 ────────────────────────────────────────────────────────────────────
+
+def _get_cluster_count(session_id: str) -> int:
+    """현재 세션이 속한 ProposalCluster의 count(동일 방향 제안 집계 수)를 반환.
+
+    세션이 클러스터에 속하지 않거나 DB 조회 실패 시 0을 반환한다.
+    LLM4Visualizer.visualize()의 cluster_count 인자로 전달되어
+    crowd_bonus(군중 가중치)를 가결 확률에 반영한다.
+    """
+    try:
+        from app.storage.db import SessionLocal
+        from app.storage.models import Session as SessionModel
+        db = SessionLocal()
+        try:
+            session_row = db.get(SessionModel, session_id)
+            if session_row and session_row.cluster_id:
+                # lazy-load cluster 관계 또는 직접 cluster 객체 참조
+                cluster = session_row.cluster
+                if cluster and cluster.count:
+                    return int(cluster.count)
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("cluster_count 조회 실패 (0으로 fallback): %s", exc)
+    return 0
 
 
 # ─── 노드 함수 ────────────────────────────────────────────────────────────────
@@ -176,9 +206,12 @@ def node_visualize(state: PipelineState) -> dict:
     proposal = PolicyProposal(**pp)
     review = ProposalReview(**pr)
     similar_cases = state["similar_cases"] or []
+    cluster_count = _get_cluster_count(state["session_id"])
     try:
         visual: VisualAnalysis = _visualizer.visualize(
-            proposal, review, similar_cases, routing.get("classification", "민원")
+            proposal, review, similar_cases,
+            routing.get("classification", "민원"),
+            cluster_count=cluster_count,
         )
         update["visual_analysis"] = visual.model_dump()
         update["processing_steps"] = state["processing_steps"] + ["✓ 분석 완료"]

@@ -1,6 +1,9 @@
+import logging
+
 from app.schemas.proposal import PolicyProposal, ProposalReview
 from app.config import settings
-import random
+
+logger = logging.getLogger(__name__)
 
 try:
     import instructor
@@ -45,30 +48,30 @@ class LLM3Reviewer:
                     self.openai_client = instructor.from_openai(
                         OpenAI(api_key=settings.openai_api_key)
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("LLM3Reviewer OpenAI 클라이언트 초기화 실패: %s", exc)
             if settings.anthropic_api_key:
                 try:
                     self.anthropic_client = instructor.from_anthropic(
                         Anthropic(api_key=settings.anthropic_api_key)
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("LLM3Reviewer Anthropic 클라이언트 초기화 실패: %s", exc)
         else:
             if OpenAI and settings.openai_api_key:
                 try:
                     self.openai_client = OpenAI(api_key=settings.openai_api_key)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("LLM3Reviewer OpenAI 클라이언트 초기화 실패 (instructor 없음): %s", exc)
             if Anthropic and settings.anthropic_api_key:
                 try:
                     self.anthropic_client = Anthropic(api_key=settings.anthropic_api_key)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("LLM3Reviewer Anthropic 클라이언트 초기화 실패 (instructor 없음): %s", exc)
 
     def _default_review(self) -> ProposalReview:
         return ProposalReview(
-            validity_score=round(random.uniform(0.65, 0.85), 2),
+            validity_score=0.70,
             strengths=["논리적 구조", "실현 가능성 고려", "명확한 목표"],
             weaknesses=["세부 운영 계획 미흡", "예산 검토 필요"],
             revision_suggestions=["관련 법령을 명시적으로 추가", "시행 계획 상세화", "부작용 분석 강화"],
@@ -126,7 +129,7 @@ buyer_centric_score: 0.0~1.0 (독자 중심 언어 점수)"""
                 else:
                     return self._openai_review_fallback(prompt)
             except Exception as e:
-                print(f"LLM3 검토 오류(OpenAI): {e}")
+                logger.warning("LLM3 검토 오류(OpenAI): %s", e)
 
         if self.anthropic_client is not None:
             try:
@@ -146,7 +149,7 @@ buyer_centric_score: 0.0~1.0 (독자 중심 언어 점수)"""
                     )
                     return self._parse_review(response.content[0].text)
             except Exception as e:
-                print(f"LLM3 검토 오류(Anthropic): {e}")
+                logger.warning("LLM3 검토 오류(Anthropic): %s", e)
 
         return self._default_review()
 

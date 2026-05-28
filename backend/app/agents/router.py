@@ -1,5 +1,9 @@
+import logging
+
 from app.config import settings
 from app.schemas.routing import RoutingResult
+
+logger = logging.getLogger(__name__)
 
 try:
     import instructor
@@ -49,26 +53,26 @@ class AIRouter:
                     self.openai_client = instructor.from_openai(
                         OpenAI(api_key=settings.openai_api_key)
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("AIRouter OpenAI 클라이언트 초기화 실패: %s", exc)
             if settings.anthropic_api_key:
                 try:
                     self.anthropic_client = instructor.from_anthropic(
                         Anthropic(api_key=settings.anthropic_api_key)
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("AIRouter Anthropic 클라이언트 초기화 실패: %s", exc)
         else:
             if settings.openai_api_key:
                 try:
                     self.openai_client = OpenAI(api_key=settings.openai_api_key)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("AIRouter OpenAI 클라이언트 초기화 실패 (instructor 없음): %s", exc)
             if Anthropic and settings.anthropic_api_key:
                 try:
                     self.anthropic_client = Anthropic(api_key=settings.anthropic_api_key)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("AIRouter Anthropic 클라이언트 초기화 실패 (instructor 없음): %s", exc)
 
     def route_message(self, message: str) -> RoutingResult:
         """사용자 메시지를 민원/제안/청원으로 분류"""
@@ -107,7 +111,7 @@ class AIRouter:
                             result.keywords = result.keywords or kw_result.keywords
                     return result
             except Exception as exc:
-                print(f"OpenAI 라우터 오류: {exc}")
+                logger.warning("AIRouter OpenAI 라우터 오류: %s", exc)
 
         if self.anthropic_client is not None:
             try:
@@ -133,7 +137,7 @@ class AIRouter:
                             result.keywords = result.keywords or kw_result.keywords
                     return result
             except Exception as exc:
-                print(f"Anthropic 라우터 오류: {exc}")
+                logger.warning("AIRouter Anthropic 라우터 오류: %s", exc)
 
         return _keyword_classify(message)
 

@@ -1,14 +1,29 @@
 from __future__ import annotations
+import logging
 import chromadb
-from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _get_ef():
-    return OpenAIEmbeddingFunction(
-        api_key=settings.openai_api_key or "dummy",
-        model_name="text-embedding-3-small",
+    """임베딩 함수 반환.
+
+    openai_api_key가 설정된 경우: OpenAI text-embedding-3-small (1536 dims).
+    미설정 시: chromadb 기본 로컬 임베딩(all-MiniLM-L6-v2, 384 dims)으로 fallback.
+    """
+    if settings.openai_api_key:
+        from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+        return OpenAIEmbeddingFunction(
+            api_key=settings.openai_api_key,
+            model_name="text-embedding-3-small",
+        )
+    logger.warning(
+        "OPENAI_API_KEY 미설정 — 로컬 임베딩(all-MiniLM-L6-v2)으로 fallback. "
+        "검색 품질이 저하될 수 있습니다."
     )
+    from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+    return DefaultEmbeddingFunction()
 
 
 class RAGRetriever:

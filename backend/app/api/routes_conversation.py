@@ -11,8 +11,11 @@ Stage 흐름:
 
 from __future__ import annotations
 
+import logging
 import uuid
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, Response
@@ -76,9 +79,9 @@ async def _generate_cluster_proposal(db: DBSession, cluster: ProposalCluster) ->
     try:
         cluster_web_ctx = await search_for_proposal(cluster.topic or "", cluster.keywords or [])
         if cluster_web_ctx:
-            print(f"[Agent2/WebSearch] {len(cluster_web_ctx)}개 결과 수집 (cluster={cluster.cluster_id})")
+            logger.info("Agent2/WebSearch %d개 결과 수집 (cluster=%s)", len(cluster_web_ctx), cluster.cluster_id)
     except Exception as _cwe:
-        print(f"[Agent2/WebSearch] 오류 (무시됨): {_cwe}")
+        logger.warning("Agent2/WebSearch 오류 (무시됨): %s", _cwe)
 
     draft = await _structurer.generate_proposal(
         synthetic_msg, prob, cluster.responsible_dept, web_context=cluster_web_ctx
@@ -178,7 +181,7 @@ def _try_save_session(db: DBSession, session_id: str, stage: str, ctx: dict, sta
             db.add(s)
         db.commit()
     except Exception as e:
-        print(f"[Session] DB 저장 실패 (무시됨): {e}")
+        logger.warning("Session DB 저장 실패 (무시됨): %s", e)
 
 
 def _try_save_message(db: DBSession, session_id: str, role: str, content: str) -> None:
@@ -192,7 +195,7 @@ def _try_save_message(db: DBSession, session_id: str, role: str, content: str) -
         ))
         db.commit()
     except Exception as e:
-        print(f"[Message] DB 저장 실패 (무시됨): {e}")
+        logger.warning("Message DB 저장 실패 (무시됨): %s", e)
 
 
 def _get_ctx_from_db(db: DBSession, session_id: str, expected_stage: str) -> dict:
@@ -259,9 +262,9 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
                     db.add(cluster)
                     _trigger_mgr.mark_triggered(db, cluster)
                     cluster_triggered = True
-                    print(f"[Agent2] 클러스터 {cluster_id} 공식문서 생성 완료: {new_proposal_id}")
+                    logger.info("Agent2 클러스터 %s 공식문서 생성 완료: %s", cluster_id, new_proposal_id)
                 except Exception as e:
-                    print(f"[Agent2] 클러스터 공식문서 생성 실패 (무시됨): {e}")
+                    logger.warning("Agent2 클러스터 공식문서 생성 실패 (무시됨): %s", e)
 
             # 세션에 cluster_id 기록
             s = db.get(SessionModel, session_id)
@@ -279,7 +282,7 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
                 db.add(s)
             db.commit()
         except Exception as e:
-            print(f"[Cluster] 배정 실패 (무시됨): {e}")
+            logger.warning("Cluster 배정 실패 (무시됨): %s", e)
 
     # 명확화 질문 생성
     questions = await _questioner.generate(full_message, routing.classification, n=5)
@@ -365,9 +368,9 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
     try:
         web_context = await search_for_proposal(topic, keywords)
         if web_context:
-            print(f"[WebSearch] {len(web_context)}개 결과 수집 (topic={topic})")
+            logger.info("WebSearch %d개 결과 수집 (topic=%s)", len(web_context), topic)
     except Exception as _we:
-        print(f"[WebSearch] 오류 (무시됨): {_we}")
+        logger.warning("WebSearch 오류 (무시됨): %s", _we)
 
     # 제안서 생성 및 DOCX 저장
     draft_proposal = await _structurer.generate_proposal(
@@ -404,11 +407,24 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
             for kw, cnt in top_kws
         ]
     except Exception as e:
-        print(f"[트렌딩키워드] 조회 오류 (무시됨): {e}")
+        logger.warning("트렌딩키워드 조회 오류 (무시됨): %s", e)
+
+    # ── 개선안 생성 (LLMImprover) ────────────────────────────────────────
+    improvements: list[dict] = []
+    try:
+        imp_objs = _improver.suggest(
+            classification=classification,
+            draft_proposal=draft_dict,
+            user_answers=answers_text,
+            n=4,
+        )
+        improvements = [imp.model_dump() for imp in imp_objs]
+    except Exception as imp_err:
+        logger.warning("개선안 생성 오류 (무시됨): %s", imp_err)
 
     new_ctx = {
         **ctx,
-        "stage": "aggregated",
+        "stage": "improving",
         "user_answers": answers_text,
         "combined_message": combined_message,
         "structured_problem": prob.model_dump(),
@@ -416,9 +432,10 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
         "similar_cases": cases,
         "draft_proposal": draft_dict,
         "docx_filename": docx_path.name,
+        "improvements": improvements,
     }
 
-    _try_save_session(db, req.session_id, "aggregated", new_ctx, "structured")
+    _try_save_session(db, req.session_id, "improving", new_ctx, "structured")
     _try_save_message(db, req.session_id, "assistant", f"[{classification}] 집적 완료 — 제안서: {draft_dict.get('title', '')}")
 
     # ── 집적 현황 (제안/청원) ─────────────────────────────────────────────
@@ -430,7 +447,7 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
                 progress_pct = min(int(cluster.count / cluster.threshold * 100), 100) if cluster.threshold else 0
                 return {
                     "session_id": req.session_id,
-                    "stage": "aggregated",
+                    "stage": "improving",
                     "classification": classification,
                     "responsible_dept": responsible_dept,
                     "cluster_id": cluster.cluster_id,
@@ -441,22 +458,26 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
                     "cluster_triggered": cluster.triggered,
                     "cluster_progress_percent": progress_pct,
                     "proposal_id": cluster.proposal_id,
+                    "draft_proposal": draft_dict,
+                    "improvements": improvements,
                     "download_url": download_url,
                     "trending_keywords": trending_keywords,
                     "ctx": new_ctx,
                 }
         except Exception as e:
-            print(f"[Answer] 클러스터 조회 오류 (무시됨): {e}")
+            logger.warning("Answer 클러스터 조회 오류 (무시됨): %s", e)
 
     # ── 민원 또는 클러스터 없는 경우 ─────────────────────────────────────
     return {
         "session_id": req.session_id,
-        "stage": "aggregated",
+        "stage": "improving",
         "classification": classification,
         "responsible_dept": responsible_dept,
         "cluster_id": None,
         "receipt_number": req.session_id[:8].upper(),
         "expected_days": 14,
+        "draft_proposal": draft_dict,
+        "improvements": improvements,
         "download_url": download_url,
         "trending_keywords": trending_keywords,
         "ctx": new_ctx,
@@ -514,6 +535,7 @@ async def conversation_finalize(req: FinalizeRequest, db: DBSession = Depends(ge
         "feasibility_score": visual.feasibility_score,
         "pass_probability": visual.pass_probability,
         "expected_duration_days": visual.expected_duration_days,
+        "visualization_data": visual.chart_data or {},  # result 페이지 BarChart + 위원회 추천
     }
     docx_path = generate_docx(final_proposal, classification, analysis_dict, req.session_id)
 
@@ -558,10 +580,10 @@ async def conversation_finalize(req: FinalizeRequest, db: DBSession = Depends(ge
                     db.add(cluster_obj)
                     db.commit()
         except Exception as ce:
-            print(f"[Finalize] 클러스터 연결 실패 (무시됨): {ce}")
+            logger.warning("Finalize 클러스터 연결 실패 (무시됨): %s", ce)
 
     except Exception as e:
-        print(f"[Finalize] DB 저장 실패 (무시됨): {e}")
+        logger.warning("Finalize DB 저장 실패 (무시됨): %s", e)
 
     final_ctx = {
         **ctx,
@@ -600,8 +622,8 @@ async def download_docx(session_id: str, db: DBSession = Depends(get_db)):
         session = db.get(SessionModel, session_id)
         if session and session.conversation_context:
             docx_filename = session.conversation_context.get("docx_filename")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("DOCX 파일명 DB 조회 실패 (파일시스템 fallback): %s", exc)
 
     # DB에서 못 찾으면 파일시스템에서 패턴 검색
     if not docx_filename:

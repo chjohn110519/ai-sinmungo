@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     # STT
     whisper_model_size: str = "base"
 
+    # ML 모델 설정
+    # ML_ENABLE_KOBERT=false 로 설정하면 KoBERT 로딩을 건너뜀 (메모리 절약, 배포 환경 최적화)
+    ml_enable_kobert: bool = True
+    # ml_assets_dir: 빈 문자열이면 app/ml_assets/ 로 자동 결정
+    ml_assets_dir: str = ""
+    # HuggingFace 모델 캐시 경로 (비어있으면 기본값 ~/.cache/huggingface 사용)
+    huggingface_cache_dir: Optional[str] = None
+
     # App
     debug: bool = True
     host: str = "0.0.0.0"

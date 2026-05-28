@@ -1,9 +1,12 @@
 """정책 제안서를 정식 법안 형식으로 변환하는 에이전트."""
 
+import logging
 from pydantic import BaseModel
 from typing import List
 from app.schemas.proposal import PolicyProposal
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 try:
     import instructor
@@ -51,24 +54,24 @@ class LLMBillGenerator:
             if settings.openai_api_key:
                 try:
                     self.openai_client = instructor.from_openai(OpenAI(api_key=settings.openai_api_key))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("LLMBillGenerator OpenAI 클라이언트 초기화 실패: %s", exc)
             if settings.anthropic_api_key:
                 try:
                     self.anthropic_client = instructor.from_anthropic(Anthropic(api_key=settings.anthropic_api_key))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("LLMBillGenerator Anthropic 클라이언트 초기화 실패: %s", exc)
         else:
             if OpenAI and settings.openai_api_key:
                 try:
                     self.openai_client = OpenAI(api_key=settings.openai_api_key)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("LLMBillGenerator OpenAI 클라이언트 초기화 실패 (instructor 없음): %s", exc)
             if Anthropic and settings.anthropic_api_key:
                 try:
                     self.anthropic_client = Anthropic(api_key=settings.anthropic_api_key)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("LLMBillGenerator Anthropic 클라이언트 초기화 실패 (instructor 없음): %s", exc)
 
     def generate_bill(self, proposal: PolicyProposal, classification: str = "제안") -> FormalBill:
         """PolicyProposal을 정식 법안으로 변환."""
@@ -107,7 +110,7 @@ class LLMBillGenerator:
                         temperature=0.3,
                     )
             except Exception as e:
-                print(f"법안 생성 오류(OpenAI): {e}")
+                logger.warning("LLMBillGenerator 법안 생성 오류(OpenAI): %s", e)
 
         if self.anthropic_client is not None:
             try:
@@ -119,7 +122,7 @@ class LLMBillGenerator:
                         response_model=FormalBill,
                     )
             except Exception as e:
-                print(f"법안 생성 오류(Anthropic): {e}")
+                logger.warning("LLMBillGenerator 법안 생성 오류(Anthropic): %s", e)
 
         # 폴백: 기본 법안 구조 반환
         return FormalBill(

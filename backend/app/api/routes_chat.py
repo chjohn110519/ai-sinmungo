@@ -1,9 +1,12 @@
 import json
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.storage.db import get_db
 from app.storage.models import (
@@ -28,7 +31,7 @@ try:
     rag_indexer = RAGIndexer(persist_dir=settings.chroma_persist_directory)
     rag_indexer.initialize_with_sample_data()
 except Exception as e:
-    print(f"RAG 초기화 오류: {e}")
+    logger.warning("RAG 초기화 오류: %s", e)
 
 
 # ─── 공통 헬퍼 ────────────────────────────────────────────────────────────────
@@ -108,11 +111,17 @@ def _state_to_response(state: PipelineState) -> ComprehensiveAnalysisResponse:
     from app.schemas.routing import RoutingResult
     from app.schemas.proposal import StructuredProblem, PolicyProposal, ProposalReview
 
+    from app.agents.router import _keyword_classify
+    _fallback_routing = _keyword_classify(state.get("message", "")) if not routing else None
     return ComprehensiveAnalysisResponse(
         session_id=state["session_id"],
         routing_result=RoutingResult(**routing) if routing else RoutingResult(
-            classification="민원", confidence=0.5,
-            responsible_dept="행정안전부", reasoning="오류"
+            classification=_fallback_routing.classification,
+            confidence=_fallback_routing.confidence,
+            responsible_dept=_fallback_routing.responsible_dept,
+            reasoning="라우팅 결과 없음 (키워드 분류 적용)",
+            topic=_fallback_routing.topic,
+            keywords=_fallback_routing.keywords,
         ),
         structured_problem=StructuredProblem(**sp) if sp else None,
         related_laws=state.get("related_laws"),
@@ -167,12 +176,18 @@ async def comprehensive_chat_endpoint(request: RoutingRequest, db: Session = Dep
         session.status = "failed"
         db.add(session)
         db.commit()
-        print(f"파이프라인 오류: {e}")
+        logger.warning("파이프라인 오류 (session=%s): %s", session_id, e)
+        from app.agents.router import _keyword_classify
+        kw = _keyword_classify(full_message)
         return ComprehensiveAnalysisResponse(
             session_id=session_id,
             routing_result=RoutingResult(
-                classification="민원", confidence=0.5,
-                responsible_dept="행정안전부", reasoning=str(e),
+                classification=kw.classification,
+                confidence=kw.confidence,
+                responsible_dept=kw.responsible_dept,
+                reasoning=str(e),
+                topic=kw.topic,
+                keywords=kw.keywords,
             ),
             processing_steps=[],
             errors=[str(e)],
@@ -273,6 +288,7 @@ async def stream_chat_endpoint(
                 yield f"data: {complete_payload}\n\n"
 
         except Exception as e:
+            logger.warning("SSE 스트리밍 오류 (session=%s): %s", session_id, e)
             yield f"data: {json.dumps({'stage': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(

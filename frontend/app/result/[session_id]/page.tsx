@@ -21,7 +21,10 @@ interface SessionResult {
     similar_cases: Array<{ case_id: string; similarity: number; title: string }>
     pass_probability: number; expected_duration_days: number
     feasibility_score: number
-    visualization_data: { timeline: Array<{ name: string; value: number }> }
+    visualization_data: {
+      timeline: Array<{ name: string; value: number }>
+      committee_recommendations?: Array<{ committee: string; relevance: number }>
+    }
   } | null
   review?: { validity_score: number; strengths: string[]; weaknesses: string[] } | null
   download_url?: string | null
@@ -372,6 +375,33 @@ export default function ResultPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {(analysis.visualization_data?.committee_recommendations?.length ?? 0) > 0 && (
+              <div className="bg-white rounded-2xl shadow-md p-6">
+                <h2 className="font-semibold text-gray-800 mb-4">🏛️ 소관 위원회 추천</h2>
+                <div className="space-y-3">
+                  {analysis.visualization_data.committee_recommendations!.map((c, i) => (
+                    <div key={i}>
+                      <div className="flex justify-between items-center text-sm mb-1">
+                        <span className="text-gray-800 font-medium">{c.committee}</span>
+                        <span className="text-blue-600 font-semibold text-xs">
+                          {Math.round(c.relevance * 100)}%
+                        </span>
+                      </div>
+                      <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full transition-all"
+                          style={{ width: `${Math.round(c.relevance * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-400 mt-3">
+                  AI가 제안서 내용을 분석하여 가장 관련성 높은 상임위원회를 추천합니다.
+                </p>
               </div>
             )}
           </>

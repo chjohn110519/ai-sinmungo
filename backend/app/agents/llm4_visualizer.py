@@ -1,11 +1,20 @@
 from app.schemas.proposal import PolicyProposal, ProposalReview
 from app.schemas.analysis import VisualAnalysis
+from app.ml import get_registry
 
 CLASSIFICATION_DURATION = {"민원": 45, "제안": 120, "청원": 270}
 
 
 class LLM4Visualizer:
-    """LLM3 검토 결과 기반 휴리스틱 분석 및 시각화 데이터 생성"""
+    """LLM3 검토 결과 기반 시각화 데이터 생성.
+
+    - feasibility_score: 휴리스틱 공식 유지 (validity_score × 가중치)
+    - pass_probability: ML 모델(KoBERT + LogReg)로 예측,
+                        모델 미설치/오류 시 기존 휴리스틱으로 자동 fallback
+    - committee_recommendations: 위원회 분류 ML 모델로 추천 리스트 생성,
+                                  오류 시 빈 리스트로 fallback
+    - expected_duration_days: 휴리스틱 공식 유지 (ML 모델이 예측하지 않는 값)
+    """
 
     def visualize(
         self,
@@ -26,9 +35,23 @@ class LLM4Visualizer:
             + apmp_bonus * 0.10,
             3,
         )
-        # 클러스터 참여 인원 보정: 많은 시민이 참여할수록 최대 +0.15 가산
-        crowd_bonus = min(cluster_count / 1000.0, 0.15) if cluster_count > 0 else 0.0
-        pass_probability = round(max(0.30, min(0.95, feasibility_score + crowd_bonus)), 3)
+
+        # ── ML 예측 ──────────────────────────────────────────────────────────
+        proposal_text = f"{proposal.background}\n{proposal.core_requests}"
+        registry = get_registry()
+
+        # pass_probability: ML 모델 사용, None 반환 시 휴리스틱으로 fallback
+        ml_prob = registry.predict_pass_probability(proposal_text)
+        if ml_prob is not None:
+            pass_probability = round(float(ml_prob), 3)
+        else:
+            # 기존 휴리스틱 (ML 미사용 환경 또는 오류 시)
+            crowd_bonus = min(cluster_count / 1000.0, 0.15) if cluster_count > 0 else 0.0
+            pass_probability = round(max(0.30, min(0.95, feasibility_score + crowd_bonus)), 3)
+
+        # committee_recommendations: ML 모델 사용, 오류 시 빈 리스트
+        committee_recs = registry.recommend_committees(proposal_text, top_k=5)
+        # ─────────────────────────────────────────────────────────────────────
 
         base_days = CLASSIFICATION_DURATION.get(classification, 120)
         dept = proposal.responsible_dept.lower()
@@ -47,6 +70,7 @@ class LLM4Visualizer:
             ],
             "feasibility": feasibility_score,
             "pass_probability": pass_probability,
+            "committee_breakdown": committee_recs,  # 위원회 추천 리스트 (프론트 차트용)
         }
 
         formatted_cases = []
@@ -56,9 +80,7 @@ class LLM4Visualizer:
                 "similarity": round(case.get("similarity", case.get("relevance", 0.5)), 3),
                 "title": case.get("title", "유사 사례"),
             })
-
-        if not formatted_cases:
-            formatted_cases = [{"case_id": "sample-001", "similarity": 0.65, "title": "유사 민원 사례"}]
+        # 유사 사례가 없으면 빈 리스트 반환 — 가짜 데이터를 주입하지 않음
 
         return VisualAnalysis(
             similar_cases=formatted_cases,
@@ -66,4 +88,5 @@ class LLM4Visualizer:
             pass_probability=pass_probability,
             expected_duration_days=expected_duration_days,
             chart_data=chart_data,
+            committee_recommendations=committee_recs if committee_recs else None,
         )

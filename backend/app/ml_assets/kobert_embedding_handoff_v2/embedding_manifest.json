@@ -1,0 +1,26 @@
+{
+  "package": "kobert_embedding_handoff_v2",
+  "model_name": "skt/kobert-base-v1",
+  "num_rows": 85578,
+  "embedding_shape": [
+    85578,
+    768
+  ],
+  "embedding_dtype": "float32",
+  "num_labels": 60,
+  "normalization": "l2",
+  "pooling": "attention_masked_mean_pooling",
+  "similarity": "cosine similarity can be computed with dot product",
+  "faiss_index_included": false,
+  "faiss_note": "faiss was not installed in the packaging environment; build IndexFlatIP from bill_kobert_embeddings.npy if needed.",
+  "files": {
+    "embeddings": "bill_kobert_embeddings.npy",
+    "metadata": "bill_kobert_metadata.csv",
+    "torch_dataset": "kobert_embedding_dataset.pt",
+    "id_map": "embedding_id_map.csv",
+    "centroids": "committee_centroids.npy",
+    "centroid_labels": "committee_centroid_labels.json",
+    "label_map": "committee_label_map.json",
+    "checksums": "checksums.sha256"
+  }
+}

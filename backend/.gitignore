@@ -1,1 +1,7 @@
 .vercel
+
+# ML assets - large training data files (not needed at inference)
+app/ml_assets/kobert_embedding_handoff_v2/*.npy
+app/ml_assets/kobert_embedding_handoff_v2/*.pt
+app/ml_assets/kobert_embedding_handoff_v2/*.csv
+app/ml_assets/kobert_embedding_handoff_v2/*.sha256

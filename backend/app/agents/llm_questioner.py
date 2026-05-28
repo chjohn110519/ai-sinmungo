@@ -106,7 +106,7 @@ class LLMQuestioner:
             if questions:
                 return questions
         except Exception as e:
-            print(f"[Questioner] LLM 오류 (폴백 사용): {type(e).__name__}: {e}")
+            import logging; logging.getLogger(__name__).warning("Questioner LLM 오류 (폴백 사용): %s: %s", type(e).__name__, e)
 
         return self._fallback(classification)
 

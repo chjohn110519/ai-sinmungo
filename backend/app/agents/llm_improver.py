@@ -5,9 +5,12 @@
 """
 
 from __future__ import annotations
+import logging
 from typing import List, Optional
 from pydantic import BaseModel
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 try:
     import instructor
@@ -69,8 +72,8 @@ class LLMImprover:
         if _INSTRUCTOR and settings.openai_api_key:
             try:
                 self._client = instructor.from_openai(OpenAI(api_key=settings.openai_api_key))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("LLMImprover OpenAI 클라이언트 초기화 실패: %s", exc)
 
     def suggest(
         self,
@@ -108,7 +111,7 @@ class LLMImprover:
                     imp.id = i
                 return result.improvements[:n]
             except Exception as e:
-                print(f"[Improver] 오류: {e}")
+                logger.warning("LLMImprover 개선안 생성 오류: %s", e)
 
         # 폴백
         return [
@@ -185,5 +188,5 @@ class LLMImprover:
             refined["responsible_dept"] = original_proposal.get("responsible_dept", refined["responsible_dept"])
             return refined
         except Exception as e:
-            print(f"[Improver] 재작성 오류: {e}")
+            logger.warning("LLMImprover 제안서 재작성 오류: %s", e)
             return original_proposal

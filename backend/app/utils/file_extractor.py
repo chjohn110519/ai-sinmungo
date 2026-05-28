@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import io
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def extract_text(data: bytes, content_type: str, filename: str) -> str:
@@ -45,7 +48,7 @@ def _extract_pdf(data: bytes) -> str:
                 pages.append(text.strip())
         return "\n\n".join(pages)
     except Exception as e:
-        print(f"[FileExtractor] PDF 추출 오류: {e}")
+        logger.warning("FileExtractor PDF 추출 오류: %s", e)
         return ""
 
 
@@ -56,7 +59,7 @@ def _extract_docx(data: bytes) -> str:
         paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
         return "\n".join(paragraphs)
     except Exception as e:
-        print(f"[FileExtractor] DOCX 추출 오류: {e}")
+        logger.warning("FileExtractor DOCX 추출 오류: %s", e)
         return ""
 
 

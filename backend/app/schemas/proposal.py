@@ -43,3 +43,4 @@ class VisualAnalysis(BaseModel):
     pass_probability: float
     expected_duration_days: int
     chart_data: dict  # 프론트에서 recharts로 렌더링
+    committee_recommendations: Optional[List[dict]] = None  # 소관 위원회 ML 추천 결과

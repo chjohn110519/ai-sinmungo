@@ -1,14 +1,15 @@
 'use client'
 
 import { useState, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Send, Mic, MicOff, CheckCircle, Circle, ChevronRight, FileText, Paperclip, X, Image as ImageIcon, Users, Download } from 'lucide-react'
+import { Send, Mic, MicOff, CheckCircle, Circle, ChevronRight, FileText, Paperclip, X, Image as ImageIcon, Users, Download, Sparkles, ArrowRight, SkipForward } from 'lucide-react'
 import ClusterStatus from './ClusterStatus'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 const STORAGE_KEY = 'complaint_sessions'
 
-type Stage = 'idle' | 'questioning' | 'aggregated'
+type Stage = 'idle' | 'questioning' | 'improving' | 'aggregated'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Ctx = Record<string, any>
@@ -34,6 +35,14 @@ interface QuestioningState {
   ctx?: Ctx
 }
 
+interface Improvement {
+  id: number
+  category: string       // '법적근거강화' | '데이터보완' | '대상확장' | '제도적맥락' | '표현개선'
+  suggestion: string
+  impact: string
+  requires_info?: string | null
+}
+
 interface TrendingKeyword {
   keyword: string
   total_count: number
@@ -41,11 +50,13 @@ interface TrendingKeyword {
   topic?: string | null
 }
 
-interface AggregatedState {
+interface ImprovingState {
   session_id: string
   classification: string
   responsible_dept: string
-  // 제안/청원
+  improvements: Improvement[]
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  draft_proposal?: Record<string, any>
   cluster_id?: string | null
   cluster_topic?: string
   cluster_keywords?: string[]
@@ -54,10 +65,28 @@ interface AggregatedState {
   cluster_triggered?: boolean
   cluster_progress_percent?: number
   proposal_id?: string | null
-  // 민원
   receipt_number?: string
   expected_days?: number
-  // 공통
+  download_url?: string
+  trending_keywords?: TrendingKeyword[]
+  ctx?: Ctx
+}
+
+// 하위 호환용 (개선 이전 세션 처리)
+interface AggregatedState {
+  session_id: string
+  classification: string
+  responsible_dept: string
+  cluster_id?: string | null
+  cluster_topic?: string
+  cluster_keywords?: string[]
+  cluster_count?: number
+  cluster_threshold?: number
+  cluster_triggered?: boolean
+  cluster_progress_percent?: number
+  proposal_id?: string | null
+  receipt_number?: string
+  expected_days?: number
   download_url?: string
   trending_keywords?: TrendingKeyword[]
   ctx?: Ctx
@@ -70,6 +99,22 @@ interface AttachmentPreview {
   size: number
   uploading: boolean
   error?: string
+}
+
+// 카테고리별 색상 + 이모지 매핑
+const CATEGORY_STYLE: Record<string, { bg: string; border: string; badge: string; text: string; icon: string }> = {
+  '법적근거강화': { bg: 'bg-blue-50',   border: 'border-blue-200',   badge: 'bg-blue-100 text-blue-700',   text: 'text-blue-800',   icon: '⚖️' },
+  '데이터보완':   { bg: 'bg-green-50',  border: 'border-green-200',  badge: 'bg-green-100 text-green-700',  text: 'text-green-800',  icon: '📊' },
+  '대상확장':     { bg: 'bg-purple-50', border: 'border-purple-200', badge: 'bg-purple-100 text-purple-700', text: 'text-purple-800', icon: '👥' },
+  '제도적맥락':   { bg: 'bg-amber-50',  border: 'border-amber-200',  badge: 'bg-amber-100 text-amber-700',  text: 'text-amber-800',  icon: '🌏' },
+  '표현개선':     { bg: 'bg-pink-50',   border: 'border-pink-200',   badge: 'bg-pink-100 text-pink-700',    text: 'text-pink-800',   icon: '✏️' },
+}
+
+function getStyle(category: string) {
+  return CATEGORY_STYLE[category] ?? {
+    bg: 'bg-gray-50', border: 'border-gray-200',
+    badge: 'bg-gray-100 text-gray-700', text: 'text-gray-800', icon: '💡',
+  }
 }
 
 function fileIcon(type: string) {
@@ -103,6 +148,8 @@ function upsertComplaintSummary(summary: { session_id: string; title: string | n
 }
 
 export default function ConversationBox() {
+  const router = useRouter()
+
   const [stage, setStage] = useState<Stage>('idle')
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -114,6 +161,9 @@ export default function ConversationBox() {
   // Stage-specific state
   const [questioningData, setQuestioningData] = useState<QuestioningState | null>(null)
   const [answers, setAnswers] = useState<Record<number, string>>({})
+  const [improvingData, setImprovingData] = useState<ImprovingState | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [userNote, setUserNote] = useState('')
   const [aggregatedData, setAggregatedData] = useState<AggregatedState | null>(null)
 
   // Attachments
@@ -122,7 +172,7 @@ export default function ConversationBox() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
 
-  const sessionId = questioningData?.session_id || aggregatedData?.session_id || null
+  const sessionId = questioningData?.session_id || improvingData?.session_id || aggregatedData?.session_id || null
 
   // ── TURN 1: 초기 메시지 전송 ───────────────────────────────────────────────
   async function handleStart() {
@@ -158,7 +208,7 @@ export default function ConversationBox() {
     }
   }
 
-  // ── TURN 2: 질문 답변 전송 ─────────────────────────────────────────────────
+  // ── TURN 2: 질문 답변 전송 → improving 단계 진입 ────────────────────────────
   async function handleAnswer() {
     if (!questioningData) return
     setIsLoading(true)
@@ -176,9 +226,72 @@ export default function ConversationBox() {
         }),
       })
       if (!res.ok) throw new Error(await res.text())
-      const data: AggregatedState = await res.json()
-      setAggregatedData(data)
-      setStage('aggregated')
+      const data: ImprovingState = await res.json()
+      setImprovingData(data)
+      setSelectedIds(new Set())
+      setUserNote('')
+      setStage('improving')
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '오류가 발생했습니다.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // ── TURN 3: 개선안 수락 → 최종 제안서 → result 페이지 ─────────────────────
+  async function handleFinalize(skipAll = false) {
+    if (!improvingData) return
+    setIsLoading(true)
+    setError(null)
+    try {
+      const res = await fetch(`${API_BASE}/api/conversation/finalize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: improvingData.session_id,
+          accepted_improvement_ids: skipAll ? [] : Array.from(selectedIds),
+          user_note: userNote || null,
+          ctx: improvingData.ctx,
+        }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      const data = await res.json()
+
+      // result 페이지에 데이터 전달 (window + sessionStorage 이중 저장)
+      const sessionResult = {
+        session: {
+          session_id: data.session_id,
+          status: 'completed',
+          final_classification: data.classification,
+        },
+        proposal: data.final_proposal,
+        analysis: {
+          similar_cases: data.similar_cases || [],
+          pass_probability: data.analysis?.pass_probability ?? 0,
+          expected_duration_days: data.analysis?.expected_duration_days ?? 14,
+          feasibility_score: data.analysis?.feasibility_score ?? 0,
+          visualization_data: data.analysis?.visualization_data || { timeline: [] },
+        },
+        review: data.review || null,
+        download_url: data.download_url || null,
+      }
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ;(window as any).__pendingResult = { sid: data.session_id, data: sessionResult }
+        sessionStorage.setItem('__pending_result',
+          JSON.stringify({ sid: data.session_id, data: sessionResult }))
+        localStorage.setItem(`result_${data.session_id}`, JSON.stringify(sessionResult))
+      } catch {}
+
+      upsertComplaintSummary({
+        session_id: data.session_id,
+        title: data.final_proposal?.title || null,
+        classification: data.classification,
+        status: 'completed',
+        created_at: new Date().toISOString(),
+      })
+
+      router.push(`/result/${data.session_id}`)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '오류가 발생했습니다.')
     } finally {
@@ -196,7 +309,6 @@ export default function ConversationBox() {
         size: file.size, uploading: true,
       }
       setAttachments(prev => [...prev, preview])
-      const idx = attachments.length
       try {
         const formData = new FormData()
         formData.append('file', file)
@@ -204,7 +316,7 @@ export default function ConversationBox() {
         const res = await fetch(`${API_BASE}/api/upload`, { method: 'POST', body: formData })
         if (!res.ok) throw new Error(await res.text())
         const data = await res.json()
-        setAttachments(prev => prev.map((a, i) =>
+        setAttachments(prev => prev.map((a) =>
           a.name === file.name && a.uploading ? { ...a, id: data.attachment_id, uploading: false } : a
         ))
       } catch {
@@ -330,12 +442,23 @@ export default function ConversationBox() {
     }
   }
 
+  function toggleSelectId(id: number) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
   function resetAll() {
     setStage('idle')
     setInput('')
     setQuestioningData(null)
+    setImprovingData(null)
     setAggregatedData(null)
     setAnswers({})
+    setSelectedIds(new Set())
+    setUserNote('')
     setAttachments([])
     setError(null)
   }
@@ -344,7 +467,8 @@ export default function ConversationBox() {
   const stages = [
     { key: 'idle', label: '민원 작성' },
     { key: 'questioning', label: 'AI 질문' },
-    { key: 'aggregated', label: '집적 완료' },
+    { key: 'improving', label: '개선안 선택' },
+    { key: 'aggregated', label: '결과 확인' },
   ]
   const currentStageIdx = stages.findIndex(s => s.key === stage)
 
@@ -564,7 +688,161 @@ export default function ConversationBox() {
         </div>
       )}
 
-      {/* ── STAGE: aggregated ────────────────────────────────────────────────── */}
+      {/* ── STAGE: improving ─────────────────────────────────────────────────── */}
+      {stage === 'improving' && improvingData && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 space-y-5">
+          {/* 헤더 */}
+          <div className="flex items-center gap-3">
+            <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
+              improvingData.classification === '민원' ? 'bg-orange-100 text-orange-700' :
+              improvingData.classification === '제안' ? 'bg-blue-100 text-blue-700' :
+              'bg-purple-100 text-purple-700'
+            }`}>
+              {improvingData.classification}
+            </span>
+            <span className="text-sm text-gray-500">{improvingData.responsible_dept}</span>
+          </div>
+
+          {/* 초안 제안서 미리보기 */}
+          {improvingData.draft_proposal?.title && (
+            <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">
+              <p className="text-xs font-semibold text-gray-400 mb-0.5">📄 초안 제안서</p>
+              <p className="text-sm font-medium text-gray-800 line-clamp-1">
+                {improvingData.draft_proposal.title as string}
+              </p>
+            </div>
+          )}
+
+          {/* 안내 텍스트 */}
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <Sparkles size={16} className="text-blue-500" />
+              <h2 className="text-base font-semibold text-gray-800">
+                AI가 통과 확률을 높일 수 있는 개선안을 분석했습니다
+              </h2>
+            </div>
+            <p className="text-sm text-gray-500">
+              적용할 항목을 선택하면 AI가 제안서를 자동으로 보완합니다. 건너뛰어도 제출은 가능합니다.
+            </p>
+          </div>
+
+          {/* 개선안 카드 */}
+          {improvingData.improvements.length > 0 ? (
+            <div className="space-y-3">
+              {improvingData.improvements.map((imp) => {
+                const style = getStyle(imp.category)
+                const selected = selectedIds.has(imp.id)
+                return (
+                  <button
+                    key={imp.id}
+                    type="button"
+                    onClick={() => toggleSelectId(imp.id)}
+                    className={`w-full text-left rounded-xl border-2 p-4 transition-all cursor-pointer ${
+                      selected
+                        ? `${style.bg} ${style.border} shadow-sm`
+                        : 'bg-white border-gray-100 hover:border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      {/* 체크박스 */}
+                      <div className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                        selected ? 'bg-blue-600 border-blue-600' : 'border-gray-300 bg-white'
+                      }`}>
+                        {selected && (
+                          <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 12 12">
+                            <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        {/* 카테고리 배지 */}
+                        <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full mb-2 ${style.badge}`}>
+                          <span>{style.icon}</span>
+                          {imp.category}
+                        </span>
+                        {/* 제안 내용 */}
+                        <p className="text-sm text-gray-800 leading-relaxed mb-1.5">
+                          {imp.suggestion}
+                        </p>
+                        {/* 기대 효과 */}
+                        <p className={`text-xs font-medium flex items-center gap-1 ${style.text}`}>
+                          <ArrowRight size={11} />
+                          {imp.impact}
+                        </p>
+                        {/* 추가 정보 필요 여부 */}
+                        {imp.requires_info && (
+                          <p className="text-xs text-amber-600 mt-1.5 bg-amber-50 rounded px-2 py-1">
+                            💬 {imp.requires_info}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-6 text-gray-400 text-sm">
+              개선안이 없습니다. 아래 버튼으로 제출할 수 있습니다.
+            </div>
+          )}
+
+          {/* 선택 요약 */}
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 rounded-lg px-3 py-2">
+              <CheckCircle size={14} className="flex-shrink-0" />
+              <span>{selectedIds.size}개 항목 선택됨 — AI가 해당 부분을 보완하여 최종 제안서를 작성합니다.</span>
+            </div>
+          )}
+
+          {/* 추가 메모 */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+              추가 메모 <span className="font-normal text-gray-400">(선택)</span>
+            </label>
+            <textarea
+              value={userNote}
+              onChange={e => setUserNote(e.target.value)}
+              placeholder="담당자에게 전달할 추가 정보나 요청사항을 입력하세요..."
+              rows={2}
+              className="w-full border border-gray-200 rounded-lg p-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder:text-gray-400"
+            />
+          </div>
+
+          {/* 버튼 영역 */}
+          <div className="flex items-center justify-between pt-1">
+            <button onClick={resetAll} className="text-sm text-gray-400 hover:text-gray-600">
+              ← 처음으로
+            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleFinalize(true)}
+                disabled={isLoading}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                title="개선안 없이 초안 그대로 제출"
+              >
+                <SkipForward size={14} />
+                건너뛰기
+              </button>
+              <button
+                onClick={() => handleFinalize(false)}
+                disabled={isLoading}
+                className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                {isLoading
+                  ? '최종 제안서 작성 중…'
+                  : selectedIds.size > 0
+                    ? `${selectedIds.size}개 적용하여 완성하기`
+                    : '개선안 없이 제출하기'
+                }
+                {!isLoading && <ArrowRight size={15} />}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── STAGE: aggregated (하위 호환 — 구 세션 처리) ─────────────────────── */}
       {stage === 'aggregated' && aggregatedData && (
         <div className="space-y-4">
           {/* 제안/청원: 집적 현황 */}

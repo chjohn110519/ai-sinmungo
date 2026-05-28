@@ -1,7 +1,11 @@
+import logging
+
 from app.rag.retriever import RAGRetriever
 from app.rag.law_api import search_laws, search_precedents
 from app.schemas.proposal import StructuredProblem
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 try:
     import instructor
@@ -32,22 +36,21 @@ class LLM2Searcher:
         if settings.openai_api_key:
             try:
                 self.openai_client = OpenAI(api_key=settings.openai_api_key)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("LLM2Searcher OpenAI 클라이언트 초기화 실패: %s", exc)
         if settings.anthropic_api_key:
             try:
                 self.anthropic_client = Anthropic(api_key=settings.anthropic_api_key)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("LLM2Searcher Anthropic 클라이언트 초기화 실패: %s", exc)
 
         # Chroma 컬렉션에 샘플 데이터가 없으면 초기화
-        if settings.openai_api_key:
-            try:
-                from app.rag.indexer import RAGIndexer
-                indexer = RAGIndexer(persist_dir)
-                indexer.initialize_with_sample_data()
-            except Exception as e:
-                print(f"[LLM2] Chroma 초기화 실패 (무시됨): {e}")
+        try:
+            from app.rag.indexer import RAGIndexer
+            indexer = RAGIndexer(persist_dir)
+            indexer.initialize_with_sample_data()
+        except Exception as e:
+            logger.warning("LLM2Searcher Chroma 초기화 실패 (무시됨): %s", e)
 
     def _llm_suggest_laws(self, problem_desc: str, classification: str, responsible_dept: str) -> list[dict]:
         """RAG/API 검색이 빈 결과일 때 LLM에게 직접 관련 법령을 물어봅니다."""
@@ -71,7 +74,7 @@ class LLM2Searcher:
                 text = response.content[0].text
                 law_names = [l.strip() for l in text.strip().splitlines() if l.strip()]
             except Exception as e:
-                print(f"[LLM2] Anthropic 법령 제안 오류: {e}")
+                logger.warning("LLM2Searcher Anthropic 법령 제안 오류: %s", e)
 
         if not law_names and self.openai_client is not None:
             try:
@@ -84,7 +87,7 @@ class LLM2Searcher:
                 text = response.choices[0].message.content
                 law_names = [l.strip() for l in text.strip().splitlines() if l.strip()]
             except Exception as e:
-                print(f"[LLM2] OpenAI 법령 제안 오류: {e}")
+                logger.warning("LLM2Searcher OpenAI 법령 제안 오류: %s", e)
 
         if not law_names:
             # LLM도 실패하면 부처별 기본 법령 반환
@@ -113,7 +116,7 @@ class LLM2Searcher:
                 for r in hits
             ]
         except Exception as e:
-            print(f"LLM2 RAG 검색 오류: {e}")
+            logger.warning("LLM2Searcher RAG 검색 오류: %s", e)
 
         api_results = search_laws(query, top_k=3)
 
@@ -149,7 +152,7 @@ class LLM2Searcher:
                 for r in hits
             ]
         except Exception as e:
-            print(f"LLM2 유사사례 검색 오류: {e}")
+            logger.warning("LLM2Searcher 유사사례 검색 오류: %s", e)
 
         prec_results = [
             {

@@ -1,3 +1,6 @@
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -12,13 +15,35 @@ from app.api.routes_cluster import router as cluster_router
 from app.config import settings
 from app.storage.db import init_db
 
+logger = logging.getLogger(__name__)
+
 init_db()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """서버 시작 시 ML 모델을 사전 로드한다.
+    로드 실패해도 서버는 정상 기동 — 해당 기능만 휴리스틱으로 fallback.
+    """
+    try:
+        from app.ml import get_registry
+        registry = get_registry()
+        logger.info(
+            "ML 모델 사전 로드 완료 | 위원회추천: %s | 가결예측: %s",
+            "활성화" if registry.committee_enabled else "비활성화",
+            "활성화" if registry.approval_enabled else "비활성화",
+        )
+    except Exception as exc:
+        logger.warning("ML 모델 로드 실패 (휴리스틱으로 동작): %s", exc)
+    yield  # 서버 실행 중
+
 
 app = FastAPI(
     title="AI 신문고 API",
     description="AI Agent 기반 국민신문고 민원·제안 자동 구조화 플랫폼",
     version="0.2.0",
     debug=settings.debug,
+    lifespan=lifespan,
 )
 
 import os as _os
