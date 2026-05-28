@@ -43,15 +43,56 @@ export default function StatusPage() {
   const [error, setError] = useState<string | null>(null)
   const [pollCount, setPollCount] = useState(0)
 
+  // localStorage에서 세션 요약을 읽어 SessionStatus 형태로 복원
+  const buildFromLocalStorage = (): SessionStatus | null => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const summaries: any[] = JSON.parse(localStorage.getItem('complaint_summaries') || '[]')
+      const found = summaries.find((s) => s.session_id === sessionId)
+      if (!found) return null
+      const isCompleted = found.status === 'completed'
+      return {
+        session_id: sessionId,
+        status: found.status,
+        current_step: isCompleted ? 6 : found.classification ? 2 : 1,
+        current_label: isCompleted ? '처리 완료' : found.classification ? '분류 완료' : '접수 완료',
+        classification: found.classification ?? null,
+        created_at: found.created_at ?? null,
+        proposal_title: found.title ?? null,
+        has_result: isCompleted,
+        steps: [
+          { step: 1, label: '접수',        done: true },
+          { step: 2, label: '분류',        done: !!found.classification },
+          { step: 3, label: '구조화',      done: isCompleted },
+          { step: 4, label: '제안서 생성', done: isCompleted },
+          { step: 5, label: '타당성 검토', done: isCompleted },
+          { step: 6, label: '처리 완료',   done: isCompleted },
+        ],
+      }
+    } catch {
+      return null
+    }
+  }
+
   const fetchStatus = useCallback(() => {
     fetch(`/api/session/${sessionId}/status`)
       .then((r) => {
-        if (!r.ok) throw new Error('처리 현황을 찾을 수 없습니다.')
+        if (!r.ok) throw new Error('not_found')
         return r.json()
       })
       .then((d) => { setStatus(d); setError(null) })
-      .catch((e) => setError(e.message))
+      .catch(() => {
+        // API 실패 시 localStorage 폴백
+        const local = buildFromLocalStorage()
+        if (local) {
+          setStatus(local)
+          setError(null)
+        } else {
+          setError('처리 현황을 찾을 수 없습니다. 접수번호를 다시 확인해 주세요.')
+        }
+      })
       .finally(() => setLoading(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId])
 
   // 미완료 상태면 5초마다 자동 폴링

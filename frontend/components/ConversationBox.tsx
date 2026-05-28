@@ -50,6 +50,16 @@ interface TrendingKeyword {
   topic?: string | null
 }
 
+interface AnalysisPreview {
+  feasibility_score: number
+  pass_probability: number
+  expected_duration_days: number
+  visualization_data: {
+    timeline?: Array<{ name: string; value: number }>
+    committee_recommendations?: Array<{ committee: string; relevance: number }>
+  }
+}
+
 interface ImprovingState {
   session_id: string
   classification: string
@@ -57,6 +67,7 @@ interface ImprovingState {
   improvements: Improvement[]
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   draft_proposal?: Record<string, any>
+  analysis?: AnalysisPreview | null
   cluster_id?: string | null
   cluster_topic?: string
   cluster_keywords?: string[]
@@ -710,6 +721,50 @@ export default function ConversationBox() {
               <p className="text-sm font-medium text-gray-800 line-clamp-1">
                 {improvingData.draft_proposal.title as string}
               </p>
+            </div>
+          )}
+
+          {/* AI 사전 분석 — 통과 확률 + 위원회 추천 */}
+          {improvingData.analysis && (
+            <div className="rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-4 space-y-3">
+              <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider">🤖 AI 사전 분석</p>
+
+              {/* 점수 행 */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-white rounded-lg px-3 py-2 text-center border border-blue-100">
+                  <p className="text-xs text-gray-500 mb-0.5">실현 가능성</p>
+                  <p className="text-lg font-bold text-blue-600">
+                    {Math.round(improvingData.analysis.feasibility_score * 100)}%
+                  </p>
+                </div>
+                <div className="bg-white rounded-lg px-3 py-2 text-center border border-blue-100">
+                  <p className="text-xs text-gray-500 mb-0.5">통과 확률</p>
+                  <p className="text-lg font-bold text-emerald-600">
+                    {Math.round(improvingData.analysis.pass_probability * 100)}%
+                  </p>
+                </div>
+              </div>
+
+              {/* 소관 위원회 추천 */}
+              {(improvingData.analysis.visualization_data?.committee_recommendations?.length ?? 0) > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold text-gray-600">🏛️ 소관 위원회 추천</p>
+                  {improvingData.analysis.visualization_data!.committee_recommendations!.slice(0, 3).map((c, i) => (
+                    <div key={i}>
+                      <div className="flex justify-between items-center text-xs mb-0.5">
+                        <span className="text-gray-700 font-medium">{c.committee}</span>
+                        <span className="text-blue-600 font-semibold">{Math.round(c.relevance * 100)}%</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-blue-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full"
+                          style={{ width: `${Math.round(c.relevance * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

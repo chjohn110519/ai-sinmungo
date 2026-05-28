@@ -42,9 +42,6 @@ export default function Home() {
             <Link href="/clusters" className="rounded-lg px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 transition-colors">
               집계 현황
             </Link>
-            <a href="#chat" className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors">
-              시작하기
-            </a>
           </div>
         </div>
       </nav>

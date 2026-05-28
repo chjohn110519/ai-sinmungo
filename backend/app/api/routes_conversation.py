@@ -422,6 +422,22 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
     except Exception as imp_err:
         logger.warning("개선안 생성 오류 (무시됨): %s", imp_err)
 
+    # ── 사전 분석 (위원회 추천 + 통과확률) — improving 화면에 바로 표시 ─────
+    analysis_preview: dict | None = None
+    try:
+        from app.schemas.proposal import PolicyProposal as _PP
+        _proposal_obj = _PP(**draft_dict)
+        _review = _reviewer.review(_proposal_obj)
+        _visual = _visualizer.visualize(_proposal_obj, _review, cases, classification)
+        analysis_preview = {
+            "feasibility_score": _visual.feasibility_score,
+            "pass_probability": _visual.pass_probability,
+            "expected_duration_days": _visual.expected_duration_days,
+            "visualization_data": _visual.chart_data or {},
+        }
+    except Exception as _ae:
+        logger.warning("Answer 분석 미리보기 오류 (무시됨): %s", _ae)
+
     new_ctx = {
         **ctx,
         "stage": "improving",
@@ -460,6 +476,7 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
                     "proposal_id": cluster.proposal_id,
                     "draft_proposal": draft_dict,
                     "improvements": improvements,
+                    "analysis": analysis_preview,
                     "download_url": download_url,
                     "trending_keywords": trending_keywords,
                     "ctx": new_ctx,
@@ -478,6 +495,7 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
         "expected_days": 14,
         "draft_proposal": draft_dict,
         "improvements": improvements,
+        "analysis": analysis_preview,
         "download_url": download_url,
         "trending_keywords": trending_keywords,
         "ctx": new_ctx,
