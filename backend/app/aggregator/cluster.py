@@ -49,7 +49,7 @@ def _keyword_overlap(kws_a: list[str], kws_b: list[str]) -> float:
 
 
 class ClusterManager:
-    KEYWORD_THRESHOLD = 0.2  # 이 이상이면 동일 클러스터로 판단
+    KEYWORD_THRESHOLD = 0.35  # 키워드 2개 이상 공유해야 같은 클러스터 (0.2→0.35: 단어 1개 우연 일치 방지)
 
     def find_matching_cluster(
         self,

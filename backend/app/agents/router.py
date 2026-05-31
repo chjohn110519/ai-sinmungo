@@ -282,17 +282,19 @@ def _keyword_classify(message: str) -> RoutingResult:
         else:
             classification = "민원"
 
-    # 주제 및 담당 부처 추출
+    # 주제 및 담당 부처 추출 — 최다 매칭 토픽 선택 (첫 번째 일치 break 방식 제거)
+    # 예: "학교 앞 불법 주정차" → 교육 1개(학교) vs 교통 2개(주차,교통) → 교통 선택
     topic = "기타"
     dept = "행정안전부"
     keywords: list[str] = []
+    best_count = 0
     for t, (kws, d) in _TOPIC_KW.items():
         matched = [kw for kw in kws if kw in msg]
-        if matched:
+        if len(matched) > best_count:
+            best_count = len(matched)
             topic = t
             dept = d
             keywords = matched[:5]
-            break
 
     return RoutingResult(
         classification=classification,
