@@ -21,17 +21,8 @@ from typing import List, Optional
 from app.schemas.analysis import ComprehensiveAnalysisResponse
 from app.schemas.proposal import VisualAnalysis
 from app.graph.pipeline import run_pipeline, stream_pipeline, PipelineState
-from app.rag.indexer import RAGIndexer
-from app.config import settings
 
 router = APIRouter()
-
-# RAG 초기화 (서버 시작 시 1회)
-try:
-    rag_indexer = RAGIndexer(persist_dir=settings.chroma_persist_directory)
-    rag_indexer.initialize_with_sample_data()
-except Exception as e:
-    logger.warning("RAG 초기화 오류: %s", e)
 
 
 # ─── 공통 헬퍼 ────────────────────────────────────────────────────────────────
@@ -151,7 +142,7 @@ def _merge_attachment_text(db: Session, session_id: str, message: str, attachmen
 
 @router.post("/chat", response_model=ComprehensiveAnalysisResponse)
 async def comprehensive_chat_endpoint(request: RoutingRequest, db: Session = Depends(get_db)):
-    """LangGraph 파이프라인 동기 실행."""
+    """LangGraph 파이프라인 실행."""
     session_id = request.session_id or str(uuid.uuid4())
 
     session = _ensure_session(db, session_id)
@@ -160,7 +151,7 @@ async def comprehensive_chat_endpoint(request: RoutingRequest, db: Session = Dep
     full_message = _merge_attachment_text(db, session_id, request.message, attachment_ids)
 
     try:
-        final_state: PipelineState = run_pipeline(full_message, session_id)
+        final_state: PipelineState = await run_pipeline(full_message, session_id)
 
         routing = final_state.get("routing_result") or {}
         session.final_classification = routing.get("classification")
@@ -228,7 +219,7 @@ async def stream_chat_endpoint(
         final_state: PipelineState = None
 
         try:
-            for step in stream_pipeline(message, session_id):
+            async for step in stream_pipeline(message, session_id):
                 for node_name, update in step.items():
                     if node_name == "__end__":
                         continue

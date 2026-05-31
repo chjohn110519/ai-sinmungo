@@ -36,7 +36,11 @@ class RAGRetriever:
             collection = self.client.get_collection(name=collection_name, embedding_function=self._ef)
         except Exception:
             return []
-        results = collection.query(query_texts=[query], n_results=min(top_k, collection.count() or 1))
+        try:
+            results = collection.query(query_texts=[query], n_results=max(1, top_k))
+        except Exception as exc:
+            logger.warning("RAG 검색 실패: %s", exc)
+            return []
         hits = []
         for i, doc_id in enumerate(results["ids"][0]):
             hits.append({

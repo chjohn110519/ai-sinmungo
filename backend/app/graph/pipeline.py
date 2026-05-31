@@ -114,11 +114,11 @@ def node_route(state: PipelineState) -> dict:
     return update
 
 
-def node_structure(state: PipelineState) -> dict:
+async def node_structure(state: PipelineState) -> dict:
     update = _step(state, "문제 구조화 중...")
     routing = state["routing_result"] or {}
     try:
-        prob: StructuredProblem = _structurer.structure(
+        prob: StructuredProblem = await _structurer.structure(
             state["message"],
             routing.get("classification", "민원"),
             routing.get("responsible_dept", "행정안전부"),
@@ -153,13 +153,13 @@ def node_search(state: PipelineState) -> dict:
     return update
 
 
-def node_generate(state: PipelineState) -> dict:
+async def node_generate(state: PipelineState) -> dict:
     update = _step(state, "제안서 생성 중...")
     routing = state["routing_result"] or {}
     sp = state["structured_problem"] or {}
     prob = StructuredProblem(**sp)
     try:
-        proposal: PolicyProposal = _structurer.generate_proposal(
+        proposal: PolicyProposal = await _structurer.generate_proposal(
             state["message"], prob, routing.get("responsible_dept", "행정안전부")
         )
         update["policy_proposal"] = proposal.model_dump()
@@ -292,16 +292,17 @@ def make_initial_state(message: str, session_id: str) -> PipelineState:
     )
 
 
-def run_pipeline(message: str, session_id: str) -> PipelineState:
-    """동기 실행 (POST /chat 용)."""
+async def run_pipeline(message: str, session_id: str) -> PipelineState:
+    """비동기 실행 (POST /chat 용)."""
     initial = make_initial_state(message, session_id)
-    return compiled_graph.invoke(initial)
+    return await compiled_graph.ainvoke(initial)
 
 
-def stream_pipeline(message: str, session_id: str):
+async def stream_pipeline(message: str, session_id: str):
     """스텝별 상태 업데이트를 yield (SSE 용).
 
     각 iteration 은 {node_name: state_update_dict} 형태.
     """
     initial = make_initial_state(message, session_id)
-    return compiled_graph.stream(initial, stream_mode="updates")
+    async for update in compiled_graph.astream(initial, stream_mode="updates"):
+        yield update

@@ -1,16 +1,26 @@
 """관리자 통계 API + 민원 목록 API."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
+from app.config import settings
 from app.storage.db import get_db
 from app.storage.models import Session as SessionModel, StructuredProposal, AnalysisResult
 
 router = APIRouter()
 
 
+def require_admin(x_admin_api_key: str | None = Header(default=None)) -> None:
+    """ADMIN_API_KEY가 설정된 환경에서만 관리자 API 키를 강제한다."""
+    if settings.admin_api_key and x_admin_api_key != settings.admin_api_key:
+        raise HTTPException(status_code=401, detail="관리자 인증이 필요합니다.")
+
+
 @router.get("/admin/stats")
-async def get_admin_stats(db: Session = Depends(get_db)):
+async def get_admin_stats(
+    _: None = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     """전체 통계 + 최근 세션 목록."""
     total = db.query(func.count(SessionModel.session_id)).scalar() or 0
 
@@ -73,6 +83,7 @@ async def list_sessions(
     page_size: int = Query(20, ge=1, le=100),
     status: str = Query(None),
     classification: str = Query(None),
+    _: None = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """민원 목록 조회 (페이지네이션 + 필터).
@@ -116,7 +127,11 @@ async def list_sessions(
 
 
 @router.get("/session/{session_id}/messages")
-async def get_session_messages(session_id: str, db: Session = Depends(get_db)):
+async def get_session_messages(
+    session_id: str,
+    _: None = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     """세션의 채팅 메시지 목록 조회 (히스토리 복원용)."""
     from app.storage.models import Message as MessageModel
     from fastapi import HTTPException

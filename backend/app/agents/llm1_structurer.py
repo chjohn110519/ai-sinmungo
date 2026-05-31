@@ -303,26 +303,26 @@ responsible_dept: "{responsible_dept}"
                 return self._default_proposal(user_input, responsible_dept, structured_problem)
 
         # ── 품질 검증: Q&A 형식 또는 너무 짧은 필드는 정제된 값으로 교체 ────────
-            bg = data.get("background") or ""
-            cr = data.get("core_requests") or ""
-            ee = data.get("expected_effects") or ""
+        bg = data.get("background") or ""
+        cr = data.get("core_requests") or ""
+        ee = data.get("expected_effects") or ""
 
-            if _is_qa_format(bg) or len(bg) < 80:
-                bg = _clean_qa_to_prose(user_input, structured_problem)
-                logger.info("LLM1: background 품질 미달 → Q&A 정제 prose로 교체")
-            if not cr or cr in ("개선 요청",):
-                cr = (
-                    "• 관련 제도 및 법령 정비\n"
-                    "• 담당 기관 내 전담 조직 구성\n"
-                    "• 이해관계자 지원 체계 마련"
-                )
-            if not ee or ee in ("정책 개선 및 국민 편의 증진",):
-                ee = (
-                    "• 문제 해소를 통한 국민 생활 개선\n"
-                    "• 관련 피해 감소\n"
-                    "• 행정 효율 및 정책 신뢰도 향상"
-                )
-            # ─────────────────────────────────────────────────────────────────────
+        if _is_qa_format(bg) or len(bg) < 80:
+            bg = _clean_qa_to_prose(user_input, structured_problem)
+            logger.info("LLM1: background 품질 미달 → Q&A 정제 prose로 교체")
+        if not cr or cr in ("개선 요청",):
+            cr = (
+                "• 관련 제도 및 법령 정비\n"
+                "• 담당 기관 내 전담 조직 구성\n"
+                "• 이해관계자 지원 체계 마련"
+            )
+        if not ee or ee in ("정책 개선 및 국민 편의 증진",):
+            ee = (
+                "• 문제 해소를 통한 국민 생활 개선\n"
+                "• 관련 피해 감소\n"
+                "• 행정 효율 및 정책 신뢰도 향상"
+            )
+        # ─────────────────────────────────────────────────────────────────────
 
         return PolicyProposal(
             title=data.get("title") or "정책 개선 제안",

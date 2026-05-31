@@ -142,18 +142,12 @@ class RAGIndexer:
         self._ef = _get_ef()
 
     def initialize_with_sample_data(self, collection_name: str = "legal_documents"):
-        """샘플 법령 데이터로 컬렉션 초기화 (이미 충분한 문서가 있으면 스킵)"""
-        collection = self.client.get_or_create_collection(
-            name=collection_name,
-            embedding_function=self._ef,
-            metadata={"hnsw:space": "cosine"},
-        )
+        """샘플 법령 데이터로 컬렉션 초기화.
 
-        existing_count = collection.count()
-        if existing_count >= 50:
-            logger.info("RAG 컬렉션 이미 초기화됨: %d개 문서", existing_count)
-            return collection
-
+        ChromaDB 일부 Windows 조합에서 collection.count()가 Python 예외가 아니라
+        프로세스 access violation을 일으키는 사례가 있어 count 기반 스킵을 쓰지 않는다.
+        명시적으로 Chroma를 켠 환경에서만 호출되며, 호출 시 샘플 컬렉션을 재생성한다.
+        """
         try:
             self.client.delete_collection(name=collection_name)
         except Exception:

@@ -83,6 +83,7 @@ cd backend && uvicorn app.main:app --reload --port 8001
 | `TAVILY_API_KEY` | 웹 검색 | 선택 |
 | `LAW_API_KEY` | 국가법령정보센터 Open API | 선택 |
 | `ML_ENABLE_KOBERT` | KoBERT 가결 예측 on/off | 기본 true |
+| `ENABLE_CHROMA` | 내부 Chroma RAG 검색 on/off (로컬 안정성을 위해 기본 false) | 선택 |
 | `ADMIN_API_KEY` | 관리자 API 보호 키 | 선택 |
 | `NEXT_PUBLIC_API_URL` | 프론트 → 백엔드 URL | 필수 |
 

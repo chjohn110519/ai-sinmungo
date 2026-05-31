@@ -24,12 +24,17 @@ class Settings(BaseSettings):
             object.__setattr__(self, "anthropic_api_key", self.anthropic_api_key.strip())
         if self.tavily_api_key:
             object.__setattr__(self, "tavily_api_key", self.tavily_api_key.strip())
+        if self.admin_api_key:
+            object.__setattr__(self, "admin_api_key", self.admin_api_key.strip())
 
     # Database
     database_url: str = _DEFAULT_DB
 
     # Chroma
     chroma_persist_directory: str = _DEFAULT_CHROMA
+    # 로컬 Windows 환경에서 ChromaDB Rust 레이어가 import/startup 중 크래시할 수 있어
+    # 기본은 비활성화한다. RAG 내부 DB 검색이 필요하면 ENABLE_CHROMA=true 로 켠다.
+    enable_chroma: bool = False
 
     # Models
     embedding_model_name: str = "jhgan/ko-sroberta-multitask"
@@ -54,6 +59,9 @@ class Settings(BaseSettings):
     ml_assets_dir: str = ""
     # HuggingFace 모델 캐시 경로 (비어있으면 기본값 ~/.cache/huggingface 사용)
     huggingface_cache_dir: Optional[str] = None
+
+    # 관리자 API 보호. 값이 설정된 경우 X-Admin-Api-Key 헤더가 일치해야 한다.
+    admin_api_key: Optional[str] = None
 
     # App
     debug: bool = True

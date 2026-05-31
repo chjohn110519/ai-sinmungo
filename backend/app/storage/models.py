@@ -118,6 +118,6 @@ class LegalDocument(Base):
 Session.messages = relationship("Message", order_by=Message.created_at, back_populates="session")
 Session.proposal = relationship("StructuredProposal", uselist=False, back_populates="session")
 Session.attachments = relationship("Attachment", order_by=Attachment.created_at, back_populates="session")
-Session.cluster = relationship("ProposalCluster", foreign_keys=[Session.cluster_id])
+Session.cluster = relationship("ProposalCluster", foreign_keys=[Session.cluster_id], back_populates="sessions")
 StructuredProposal.analysis = relationship("AnalysisResult", uselist=False, back_populates="proposal")
-ProposalCluster.sessions = relationship("Session", foreign_keys=[Session.cluster_id])
+ProposalCluster.sessions = relationship("Session", foreign_keys=[Session.cluster_id], back_populates="cluster")

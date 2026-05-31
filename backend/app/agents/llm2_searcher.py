@@ -28,9 +28,18 @@ class LLM2Searcher:
     """관련 법령 및 유사 사례를 검색하는 RAG + 국가법령정보센터 API 에이전트."""
 
     def __init__(self, persist_dir: str = "./chroma_db"):
-        self.retriever = RAGRetriever(persist_dir)
+        self.retriever = None
         self.openai_client = None
         self.anthropic_client = None
+
+        if settings.enable_chroma:
+            try:
+                self.retriever = RAGRetriever(persist_dir)
+            except Exception as exc:
+                logger.warning("LLM2Searcher Chroma retriever 초기화 실패 (비활성화): %s", exc)
+                self.retriever = None
+        else:
+            logger.info("ENABLE_CHROMA=false — 내부 Chroma RAG 검색 비활성화")
 
         # LLM 클라이언트 초기화 (법령 fallback용)
         if settings.openai_api_key:
@@ -44,13 +53,15 @@ class LLM2Searcher:
             except Exception as exc:
                 logger.warning("LLM2Searcher Anthropic 클라이언트 초기화 실패: %s", exc)
 
-        # Chroma 컬렉션에 샘플 데이터가 없으면 초기화
-        try:
-            from app.rag.indexer import RAGIndexer
-            indexer = RAGIndexer(persist_dir)
-            indexer.initialize_with_sample_data()
-        except Exception as e:
-            logger.warning("LLM2Searcher Chroma 초기화 실패 (무시됨): %s", e)
+        # Chroma 컬렉션에 샘플 데이터가 없으면 초기화.
+        # import/startup 시점 크래시 방지를 위해 명시적으로 켠 경우에만 실행한다.
+        if self.retriever is not None:
+            try:
+                from app.rag.indexer import RAGIndexer
+                indexer = RAGIndexer(persist_dir)
+                indexer.initialize_with_sample_data()
+            except Exception as e:
+                logger.warning("LLM2Searcher Chroma 초기화 실패 (무시됨): %s", e)
 
     def _llm_suggest_laws(self, problem_desc: str, classification: str, responsible_dept: str) -> list[dict]:
         """RAG/API 검색이 빈 결과일 때 LLM에게 직접 관련 법령을 물어봅니다."""
@@ -104,6 +115,8 @@ class LLM2Searcher:
 
         rag_results: list[dict] = []
         try:
+            if self.retriever is None:
+                raise RuntimeError("Chroma RAG disabled")
             hits = self.retriever.search(query, top_k=top_k, collection_name="legal_documents")
             rag_results = [
                 {
@@ -140,6 +153,8 @@ class LLM2Searcher:
 
         rag_results: list[dict] = []
         try:
+            if self.retriever is None:
+                raise RuntimeError("Chroma RAG disabled")
             hits = self.retriever.search(query, top_k=top_k, collection_name="legal_documents")
             rag_results = [
                 {

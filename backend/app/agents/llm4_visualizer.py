@@ -61,10 +61,16 @@ class LLM4Visualizer:
         committee_recs = registry.recommend_committees(proposal_text, top_k=5)
         # ─────────────────────────────────────────────────────────────────────
 
-        base_days = CLASSIFICATION_DURATION.get(classification, 120)
-        dept = proposal.responsible_dept.lower()
-        multiplier = 1.2 if any(kw in dept for kw in ("국토", "건설", "교통", "인프라")) else 1.0
-        expected_duration_days = int(base_days * multiplier)
+        duration_source = "heuristic"
+        predicted_days = registry.predict_approval_duration_days(proposal_text)
+        if predicted_days is not None:
+            expected_duration_days = max(1, int(round(predicted_days)))
+            duration_source = "predicted_date_of_approval"
+        else:
+            base_days = CLASSIFICATION_DURATION.get(classification, 120)
+            dept = proposal.responsible_dept.lower()
+            multiplier = 1.2 if any(kw in dept for kw in ("국토", "건설", "교통", "인프라")) else 1.0
+            expected_duration_days = int(base_days * multiplier)
 
         review_days = int(expected_duration_days * 0.20)
         legislation_days = int(expected_duration_days * 0.50)
@@ -87,6 +93,7 @@ class LLM4Visualizer:
             ],
             "stage_predictions": stage_predictions,  # KoBERT 활성화 시 진행단계 예측
             "top_committee": top_committee_name,      # 소관 위원회 최상위 추천
+            "duration_prediction_source": duration_source,
         }
 
         formatted_cases = []

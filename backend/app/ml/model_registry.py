@@ -81,7 +81,12 @@ def _build_registry() -> "ModelRegistry":
     asset_dir = _resolve_asset_dir()
     committee_rec = _try_load_committee_recommender(asset_dir)
     approve_pred = _try_load_approve_predictor(asset_dir)
-    return ModelRegistry(committee_rec=committee_rec, approve_pred=approve_pred)
+    duration_pred = _try_load_duration_predictor(asset_dir)
+    return ModelRegistry(
+        committee_rec=committee_rec,
+        approve_pred=approve_pred,
+        duration_pred=duration_pred,
+    )
 
 
 def _try_load_committee_recommender(asset_dir: Path):
@@ -148,6 +153,45 @@ def _try_load_approve_predictor(asset_dir: Path):
         return None
 
 
+def _try_load_duration_predictor(asset_dir: Path):
+    """가결 예상 소요기간 모델 로드 (실패해도 None 반환)."""
+    enable_kobert = True
+    try:
+        from app.config import settings
+        enable_kobert = settings.ml_enable_kobert
+    except Exception:
+        enable_kobert = os.environ.get("ML_ENABLE_KOBERT", "true").lower() not in ("false", "0", "no")
+
+    if not enable_kobert:
+        logger.info("ml_enable_kobert=false — 기간 예측 비활성화")
+        return None
+
+    model_path = asset_dir / "duration_regressor.joblib"
+    handoff_dir = asset_dir / "kobert_embedding_handoff_v2"
+
+    try:
+        import joblib  # noqa: F401
+        import lightgbm  # noqa: F401
+        from app.ml.duration_predictor import ApprovalDurationPredictor
+        if not model_path.exists():
+            logger.warning("기간 예측 모델 파일 없음: %s — 기간 예측 비활성화", model_path)
+            return None
+        if not (handoff_dir / "embedding_manifest.json").exists():
+            logger.warning("KoBERT manifest 없음: %s — 기간 예측 비활성화", handoff_dir)
+            return None
+        return ApprovalDurationPredictor(model_path=model_path, handoff_dir=handoff_dir)
+    except ImportError as exc:
+        logger.warning(
+            "기간 예측 의존성 미설치 (비활성화): %s\n"
+            "  설치: pip install lightgbm torch transformers sentencepiece",
+            exc,
+        )
+        return None
+    except Exception as exc:
+        logger.warning("기간 예측 모델 로드 실패 (비활성화): %s", exc)
+        return None
+
+
 # ── ModelRegistry 클래스 ───────────────────────────────────────────────────────
 
 class ModelRegistry:
@@ -160,17 +204,20 @@ class ModelRegistry:
       - 예측 중 런타임 오류 시 경고 로그 후 None / [] 반환
     """
 
-    def __init__(self, committee_rec, approve_pred):
+    def __init__(self, committee_rec, approve_pred, duration_pred=None):
         self._committee_rec = committee_rec
         self._approve_pred = approve_pred
+        self._duration_pred = duration_pred
 
         # 상태 로그
         committee_status = f"{len(self._committee_rec.le.classes_)}개 위원회 클래스" if committee_rec else "비활성화"
         approve_status = "활성화" if approve_pred else "비활성화"
+        duration_status = "활성화" if duration_pred else "비활성화"
         logger.info(
-            "ModelRegistry 초기화 완료 | 위원회추천: %s | 가결예측: %s",
+            "ModelRegistry 초기화 완료 | 위원회추천: %s | 가결예측: %s | 기간예측: %s",
             committee_status,
             approve_status,
+            duration_status,
         )
 
     @property
@@ -180,6 +227,10 @@ class ModelRegistry:
     @property
     def approval_enabled(self) -> bool:
         return self._approve_pred is not None
+
+    @property
+    def duration_enabled(self) -> bool:
+        return self._duration_pred is not None
 
     def predict_pass_probability(self, text: str) -> float | None:
         """
@@ -229,3 +280,19 @@ class ModelRegistry:
         except Exception as exc:
             logger.warning("위원회 추천 중 오류: %s", exc)
             return []
+
+    def predict_approval_duration_days(self, text: str) -> float | None:
+        """
+        가결 예상 소요기간(일)을 반환한다.
+
+        Returns:
+            float — Predicted_date_of_approval 모델 예측값
+            None — 모델 미사용 또는 오류
+        """
+        if self._duration_pred is None:
+            return None
+        try:
+            return self._duration_pred.predict_days(text)
+        except Exception as exc:
+            logger.warning("기간 예측 중 오류 (휴리스틱 사용): %s", exc)
+            return None
