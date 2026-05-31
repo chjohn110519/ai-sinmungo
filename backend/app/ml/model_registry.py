@@ -82,11 +82,28 @@ def _build_registry() -> "ModelRegistry":
     committee_rec = _try_load_committee_recommender(asset_dir)
     approve_pred = _try_load_approve_predictor(asset_dir)
     duration_pred = _try_load_duration_predictor(asset_dir)
+    classification_pred = _try_load_classification_predictor(asset_dir)
     return ModelRegistry(
         committee_rec=committee_rec,
         approve_pred=approve_pred,
         duration_pred=duration_pred,
+        classification_pred=classification_pred,
     )
+
+
+def _try_load_classification_predictor(asset_dir: Path):
+    """민원/제안/청원 분류 모델 로드 (실패해도 None 반환)."""
+    model_path = asset_dir / "classification_model.joblib"
+    try:
+        import joblib  # noqa: F401
+        from app.ml.classification_predictor import ClassificationPredictor
+        if not model_path.exists():
+            logger.info("분류 모델 파일 없음: %s — 키워드 기반 분류 사용", model_path)
+            return None
+        return ClassificationPredictor(model_path=model_path)
+    except Exception as exc:
+        logger.warning("분류 모델 로드 실패 (키워드 기반 분류 사용): %s", exc)
+        return None
 
 
 def _try_load_committee_recommender(asset_dir: Path):
@@ -204,20 +221,23 @@ class ModelRegistry:
       - 예측 중 런타임 오류 시 경고 로그 후 None / [] 반환
     """
 
-    def __init__(self, committee_rec, approve_pred, duration_pred=None):
+    def __init__(self, committee_rec, approve_pred, duration_pred=None, classification_pred=None):
         self._committee_rec = committee_rec
         self._approve_pred = approve_pred
         self._duration_pred = duration_pred
+        self._classification_pred = classification_pred
 
         # 상태 로그
         committee_status = f"{len(self._committee_rec.le.classes_)}개 위원회 클래스" if committee_rec else "비활성화"
         approve_status = "활성화" if approve_pred else "비활성화"
         duration_status = "활성화" if duration_pred else "비활성화"
+        classification_status = "활성화" if classification_pred else "비활성화"
         logger.info(
-            "ModelRegistry 초기화 완료 | 위원회추천: %s | 가결예측: %s | 기간예측: %s",
+            "ModelRegistry 초기화 완료 | 위원회추천: %s | 가결예측: %s | 기간예측: %s | 분류: %s",
             committee_status,
             approve_status,
             duration_status,
+            classification_status,
         )
 
     @property
@@ -295,4 +315,20 @@ class ModelRegistry:
             return self._duration_pred.predict_days(text)
         except Exception as exc:
             logger.warning("기간 예측 중 오류 (휴리스틱 사용): %s", exc)
+            return None
+
+    def predict_classification(self, text: str) -> dict | None:
+        """
+        민원/제안/청원 분류를 반환한다.
+
+        Returns:
+            dict — {"classification": "민원"|"제안"|"청원", "confidence": float}
+            None — 모델 미사용 또는 오류
+        """
+        if self._classification_pred is None:
+            return None
+        try:
+            return self._classification_pred.predict(text)
+        except Exception as exc:
+            logger.warning("분류 예측 중 오류 (키워드 기반 분류 사용): %s", exc)
             return None
