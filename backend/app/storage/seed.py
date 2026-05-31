@@ -1,9 +1,17 @@
-"""DB 초기 예시 데이터. ProposalCluster가 비어 있을 때만 삽입."""
+"""DB 초기 예시 데이터.
+
+SEED_VERSION이 바뀌면 기존 seed 클러스터를 모두 삭제하고 새로 삽입한다.
+(Railway DB가 볼륨으로 유지되어도 버전 변경 시 자동 재시드)
+"""
 
 import uuid
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session as DBSession
 from app.storage.models import ProposalCluster, StructuredProposal, AnalysisResult, Session as SessionModel
+
+# 씨드 버전 — 이 값을 바꾸면 다음 배포 시 기존 씨드 데이터를 삭제하고 재삽입한다.
+SEED_VERSION = "v3_20260601"
+_SEED_MARKER_ID = f"__seed_version__{SEED_VERSION}__"
 
 
 _SEED_CLUSTERS = [
@@ -234,9 +242,23 @@ _TRIGGERED_PROPOSAL = {
 
 
 def seed_if_empty(db: DBSession) -> None:
-    """ProposalCluster 테이블이 비어 있을 때만 예시 데이터를 삽입."""
-    if db.query(ProposalCluster).count() > 0:
+    """씨드 버전이 다르면 기존 씨드 클러스터를 삭제하고 새로 삽입한다."""
+    # 이미 이 버전으로 시드됐으면 건너뜀
+    if db.query(SessionModel).filter(SessionModel.session_id == _SEED_MARKER_ID).first():
         return
+
+    # 기존 씨드 데이터 정리 (클러스터·제안서·분석결과 삭제)
+    # 실제 사용자 세션은 cluster_id를 NULL로 초기화 후 클러스터만 삭제
+    try:
+        db.query(SessionModel).filter(
+            SessionModel.cluster_id.isnot(None)
+        ).update({"cluster_id": None}, synchronize_session=False)
+        db.query(AnalysisResult).delete(synchronize_session=False)
+        db.query(StructuredProposal).delete(synchronize_session=False)
+        db.query(ProposalCluster).delete(synchronize_session=False)
+        db.commit()
+    except Exception:
+        db.rollback()
 
     now = datetime.utcnow()
     triggered_cluster_id = str(uuid.uuid4())
@@ -307,5 +329,14 @@ def seed_if_empty(db: DBSession) -> None:
                 created_at=opinion_time,
             )
             db.add(session)
+
+    # 씨드 버전 마커 세션 삽입 — 다음 시작 시 재시드 방지
+    db.add(SessionModel(
+        session_id=_SEED_MARKER_ID,
+        status="completed",
+        conversation_stage="seed",
+        conversation_context={"type": "seed_version_marker", "version": SEED_VERSION},
+        created_at=now,
+    ))
 
     db.commit()
