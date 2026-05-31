@@ -416,30 +416,35 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
     docx_path = generate_docx(draft_dict, classification, None, req.session_id)
     download_url = f"/api/session/{req.session_id}/download/docx"
 
-    # ── 트렌딩 키워드 조회 ────────────────────────────────────────────────
+    # ── 트렌딩 주제 조회 ─────────────────────────────────────────────────
     trending_keywords: list[dict] = []
     try:
         all_clusters = db.query(ProposalCluster).all()
-        kw_weights: dict[str, int] = {}
-        kw_best: dict[str, dict] = {}
+        topic_weights: dict[str, int] = {}
+        topic_best: dict[str, dict] = {}
         for c in all_clusters:
-            for kw in (c.keywords or []):
-                kw_weights[kw] = kw_weights.get(kw, 0) + c.count
-                prev = kw_best.get(kw)
-                if prev is None or c.count > prev["count"]:
-                    kw_best[kw] = {"cluster_id": c.cluster_id, "topic": c.topic, "count": c.count}
-        top_kws = sorted(kw_weights.items(), key=lambda x: x[1], reverse=True)[:10]
+            topic_name = (c.topic or "기타").strip() or "기타"
+            topic_weights[topic_name] = topic_weights.get(topic_name, 0) + c.count
+            prev = topic_best.get(topic_name)
+            if prev is None or c.count > prev["count"]:
+                topic_best[topic_name] = {
+                    "cluster_id": c.cluster_id,
+                    "topic": topic_name,
+                    "count": c.count,
+                }
+        top_kws = sorted(topic_weights.items(), key=lambda x: x[1], reverse=True)[:10]
         trending_keywords = [
             {
-                "keyword": kw,
+                # 기존 프론트 호환용 필드명. 값은 키워드가 아니라 주제명이다.
+                "keyword": topic_name,
+                "topic": topic_name,
                 "total_count": cnt,
-                "cluster_id": kw_best.get(kw, {}).get("cluster_id"),
-                "topic": kw_best.get(kw, {}).get("topic"),
+                "cluster_id": topic_best.get(topic_name, {}).get("cluster_id"),
             }
-            for kw, cnt in top_kws
+            for topic_name, cnt in top_kws
         ]
     except Exception as e:
-        logger.warning("트렌딩키워드 조회 오류 (무시됨): %s", e)
+        logger.warning("트렌딩주제 조회 오류 (무시됨): %s", e)
 
     # ── 개선안 생성 (LLMImprover) ────────────────────────────────────────
     improvements: list[dict] = []

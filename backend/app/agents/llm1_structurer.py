@@ -68,6 +68,115 @@ def _clean_qa_to_prose(user_input: str, structured_problem=None) -> str:
     return "\n\n".join(parts) if parts else (original or "제안 내용을 확인해 주세요.")
 
 
+def _default_laws_for_dept(responsible_dept: str) -> list[str]:
+    dept = responsible_dept or ""
+    if "국토" in dept or "교통" in dept:
+        return ["도로법", "도로교통법", "교통안전법", "보행안전 및 편의증진에 관한 법률", "국토의 계획 및 이용에 관한 법률", "지방자치법", "행정절차법"]
+    if "환경" in dept:
+        return ["환경정책기본법", "대기환경보전법", "물환경보전법", "폐기물관리법", "소음·진동관리법", "지방자치법", "행정절차법"]
+    if "복지" in dept or "보건" in dept:
+        return ["사회복지사업법", "국민건강보험법", "노인복지법", "장애인복지법", "아동복지법", "지방자치법", "행정절차법"]
+    if "교육" in dept:
+        return ["교육기본법", "초·중등교육법", "고등교육법", "학교보건법", "학교폭력예방 및 대책에 관한 법률", "지방자치법", "행정절차법"]
+    if "노동" in dept or "고용" in dept:
+        return ["근로기준법", "산업안전보건법", "고용보험법", "직업안정법", "최저임금법", "지방자치법", "행정절차법"]
+    return ["민원 처리에 관한 법률", "행정절차법", "전자정부법", "개인정보 보호법", "지방자치법", "공공기관의 운영에 관한 법률", "국가재정법"]
+
+
+def _needs_expansion(text: str, min_len: int) -> bool:
+    clean = (text or "").strip()
+    return len(clean) < min_len or _is_qa_format(clean)
+
+
+def _structured_background(existing: str, user_input: str, structured_problem) -> str:
+    base = existing.strip()
+    if _needs_expansion(base, 450):
+        base = _clean_qa_to_prose(user_input, structured_problem)
+
+    cause = getattr(structured_problem, "cause", "") or "제출된 의견에서 확인되는 생활상 불편과 제도적 공백"
+    subjects = getattr(structured_problem, "affected_subjects", "") or "해당 문제의 영향을 받는 시민"
+    direction = getattr(structured_problem, "resolution_direction", "") or "담당 기관의 제도 개선과 현장 조치"
+
+    if len(base) >= 450 and not _is_qa_format(base) and ("1." in base or "현황" in base):
+        return base
+
+    return (
+        "1. 현황 및 문제 인식\n"
+        f"{base}\n\n"
+        "2. 문제 원인\n"
+        f"본 사안의 핵심 원인은 {cause}로 정리된다. 단순한 개별 불편이 아니라 반복적으로 발생할 경우 행정 신뢰도, 시민 안전, 생활 편의에 영향을 줄 수 있는 공공 문제로 볼 수 있다.\n\n"
+        "3. 영향 대상과 공공성\n"
+        f"주요 영향 대상은 {subjects}이다. 해당 대상은 직접적인 불편을 겪는 시민뿐 아니라 같은 생활권을 이용하는 주민, 방문자, 취약계층까지 확장될 수 있으므로 공공 개입 필요성이 있다.\n\n"
+        "4. 제도 개선 필요성\n"
+        f"해결 방향은 {direction}이다. 이를 위해 담당 기관은 현황 확인, 관련 법령 검토, 예산 및 집행 가능성 검토, 단계별 개선 계획 수립을 함께 추진할 필요가 있다. 정확한 피해 규모와 빈도는 추가 행정조사 또는 공개 통계 확인을 통해 보완하는 것이 바람직하다."
+    )
+
+
+def _structured_core_requests(existing: str, structured_problem, responsible_dept: str) -> str:
+    clean = existing.strip()
+    if not _needs_expansion(clean, 450) and clean.count("\n") >= 3:
+        return clean
+
+    cause = getattr(structured_problem, "cause", "") or "현장 문제"
+    direction = getattr(structured_problem, "resolution_direction", "") or "제도 개선"
+    subjects = getattr(structured_problem, "affected_subjects", "") or "시민"
+
+    return (
+        "1. 현황 조사 및 실태 확인\n"
+        f"- {responsible_dept} 또는 관계 기관은 {cause}와 관련된 현장 현황, 민원 발생 빈도, 피해 대상, 기존 조치 이력을 우선 조사해야 한다.\n\n"
+        "2. 관련 법령 및 지침 정비\n"
+        f"- {direction}이 실제 행정 조치로 이어질 수 있도록 관련 법령, 조례, 내부 지침, 예산 집행 기준을 함께 검토하고 필요한 경우 개정안을 마련해야 한다.\n\n"
+        "3. 단계별 실행 계획 수립\n"
+        "- 즉시 조치가 가능한 사항은 단기 과제로 분리하고, 예산·시설·인력 확보가 필요한 사항은 6개월 및 1년 단위의 중장기 과제로 나누어 추진해야 한다.\n\n"
+        "4. 시민 안내 및 의견 수렴 체계 마련\n"
+        f"- {subjects}이 처리 상황을 확인할 수 있도록 접수 번호, 담당 부서, 예상 처리 기간, 후속 조치 계획을 안내하고 추가 의견을 제출할 수 있는 창구를 제공해야 한다.\n\n"
+        "5. 성과 관리 및 재발 방지\n"
+        "- 조치 이후에는 처리 결과, 만족도, 재발 여부를 확인하고 동일 유형의 민원이 반복되지 않도록 정기 점검 기준을 마련해야 한다."
+    )
+
+
+def _structured_expected_effects(existing: str, structured_problem) -> str:
+    clean = existing.strip()
+    if not _needs_expansion(clean, 320) and clean.count("\n") >= 3:
+        return clean
+
+    subjects = getattr(structured_problem, "affected_subjects", "") or "시민"
+    direction = getattr(structured_problem, "resolution_direction", "") or "제도 개선"
+
+    return (
+        "1. 직접 효과\n"
+        f"- {subjects}이 겪는 불편과 위험을 줄이고, 문제 해결 과정의 예측 가능성을 높일 수 있다.\n"
+        f"- {direction}이 제도화되면 담당 기관의 처리 기준이 명확해져 유사 사안의 대응 속도가 개선된다.\n"
+        "- 접수, 검토, 조치, 결과 안내가 하나의 흐름으로 정리되어 시민의 반복 문의와 행정 부담을 줄일 수 있다.\n\n"
+        "2. 간접 효과\n"
+        "- 동일 유형의 문제가 축적될 경우 정책 개선 의제로 발전시킬 수 있어 단발성 민원을 구조적 개선으로 연결할 수 있다.\n"
+        "- 처리 과정과 근거가 문서화되므로 행정 투명성, 정책 신뢰도, 시민 참여 효능감을 높일 수 있다.\n\n"
+        "3. 성과 확인 방식\n"
+        "- 처리 완료 건수, 재발 민원 수, 시민 만족도, 조치 소요 기간, 관련 예산 집행 여부를 기준으로 개선 효과를 사후 점검할 수 있다."
+    )
+
+
+def _fallback_summary(proposal_title: str, structured_problem) -> str:
+    direction = getattr(structured_problem, "resolution_direction", "") or "제도 개선"
+    subjects = getattr(structured_problem, "affected_subjects", "") or "시민"
+    return (
+        f"{proposal_title}은 {subjects}이 겪는 불편을 줄이기 위해 {direction}을 추진하도록 요청하는 제안이다. "
+        "현황 조사, 법령 검토, 단계별 실행계획, 사후 점검을 함께 마련해 실질적인 개선으로 연결하는 것이 핵심이다."
+    )[:220]
+
+
+def _fallback_proof_points(user_input: str, structured_problem) -> list[str]:
+    original = user_input.split("[추가 정보]")[0].strip()
+    points = []
+    if original:
+        points.append(f"사용자 제출 내용: {original[:120]}")
+    if getattr(structured_problem, "affected_subjects", None):
+        points.append(f"영향 대상: {structured_problem.affected_subjects}")
+    if getattr(structured_problem, "resolution_direction", None):
+        points.append(f"해결 방향: {structured_problem.resolution_direction}")
+    return points[:5]
+
+
 def _extract_json(text: str) -> dict:
     """텍스트에서 JSON 블록 추출 (Anthropic 등 plain-text 응답 파싱용)."""
     try:
@@ -250,6 +359,7 @@ proof_points (검색 결과에서 확인된 사실 기반, 최대 5개):
 background (600자 이상):
 ⚠️ 중요: 원본 입력의 "Q1., A., Q2., A." 형식을 그대로 복사하지 마세요.
 모든 내용을 전문적인 행정 서술체로 완전히 재작성해야 합니다.
+- 반드시 "1. 현황 및 문제 인식", "2. 문제 원인", "3. 영향 대상과 공공성", "4. 제도 개선 필요성"의 4개 소제목으로 구성하세요.
 - 위 [실제 검색 결과]에서 확인된 통계·수치만 포함하세요.
 - 검색 결과에 없는 구체적 숫자는 추정하지 말고 서술형으로 대체하세요.
   예: "정확한 규모는 관련 기관 통계 확인이 필요하나, 검색 결과에 따르면..."
@@ -260,10 +370,12 @@ background (600자 이상):
 
 core_requests (600자 이상):
 - 최소 5개의 구체적 정책 요청 사항
+- 반드시 번호 목록으로 작성하고, 각 항목은 "요청 내용 - 실행 방식 - 담당 주체"가 드러나야 합니다.
 - 각 요청에 "○○법 제○조에 따라..." 형식으로 법적 근거 명시
 - 단계별 이행 방안 포함
 
 expected_effects (400자 이상):
+- 반드시 "1. 직접 효과", "2. 간접 효과", "3. 성과 확인 방식"의 3개 소제목으로 구성하세요.
 - 직접 효과 3가지 이상 (정량적 목표 포함)
 - 간접 효과 2가지 이상
 
@@ -307,33 +419,41 @@ responsible_dept: "{responsible_dept}"
         cr = data.get("core_requests") or ""
         ee = data.get("expected_effects") or ""
 
-        if _is_qa_format(bg) or len(bg) < 80:
-            bg = _clean_qa_to_prose(user_input, structured_problem)
-            logger.info("LLM1: background 품질 미달 → Q&A 정제 prose로 교체")
-        if not cr or cr in ("개선 요청",):
-            cr = (
-                "• 관련 제도 및 법령 정비\n"
-                "• 담당 기관 내 전담 조직 구성\n"
-                "• 이해관계자 지원 체계 마련"
-            )
-        if not ee or ee in ("정책 개선 및 국민 편의 증진",):
-            ee = (
-                "• 문제 해소를 통한 국민 생활 개선\n"
-                "• 관련 피해 감소\n"
-                "• 행정 효율 및 정책 신뢰도 향상"
-            )
+        if _needs_expansion(bg, 450):
+            logger.info("LLM1: background 품질 미달 → 구조화 배경으로 확장")
+        if _needs_expansion(cr, 450):
+            logger.info("LLM1: core_requests 품질 미달 → 구조화 요청사항으로 확장")
+        if _needs_expansion(ee, 320):
+            logger.info("LLM1: expected_effects 품질 미달 → 구조화 기대효과로 확장")
+
+        bg = _structured_background(bg, user_input, structured_problem)
+        cr = _structured_core_requests(cr, structured_problem, responsible_dept)
+        ee = _structured_expected_effects(ee, structured_problem)
+
+        related_laws = [
+            item.get("title", "") if isinstance(item, dict) else str(item)
+            for item in (data.get("related_laws") or [])
+            if item
+        ]
+        if len(related_laws) < 5:
+            related_laws = list(dict.fromkeys(related_laws + _default_laws_for_dept(responsible_dept)))
+
+        title = data.get("title") or "정책 개선 제안"
+        executive_summary = data.get("executive_summary") or _fallback_summary(title, structured_problem)
+        win_theme = data.get("win_theme") or structured_problem.win_theme
+        proof_points = data.get("proof_points") or _fallback_proof_points(user_input, structured_problem)
         # ─────────────────────────────────────────────────────────────────────
 
         return PolicyProposal(
-            title=data.get("title") or "정책 개선 제안",
+            title=title,
             background=bg,
             core_requests=cr,
             expected_effects=ee,
             responsible_dept=data.get("responsible_dept", responsible_dept),
-            related_laws=data.get("related_laws", []),
-            executive_summary=data.get("executive_summary") or None,
-            win_theme=data.get("win_theme") or None,
-            proof_points=data.get("proof_points") or None,
+            related_laws=related_laws,
+            executive_summary=executive_summary,
+            win_theme=win_theme,
+            proof_points=proof_points,
         )
 
     def _default_proposal(
@@ -347,27 +467,18 @@ responsible_dept: "{responsible_dept}"
         background: Q&A raw 텍스트 대신 structured_problem + 원문에서 prose 생성.
         core_requests / expected_effects: 빈 문자열 대신 기본 bullet 3개 제공.
         """
-        background = (
-            _clean_qa_to_prose(user_input, structured_problem)
-            if _is_qa_format(user_input)
-            else (user_input.strip() or "제안 내용을 확인해 주세요.")
-        )
+        title = "정책 개선 제안"
+        background = _structured_background("", user_input, structured_problem)
+        core_requests = _structured_core_requests("", structured_problem, responsible_dept)
+        expected_effects = _structured_expected_effects("", structured_problem)
         return PolicyProposal(
-            title="정책 개선 제안",
+            title=title,
             background=background,
-            core_requests=(
-                "• 관련 제도 및 법령 정비\n"
-                "• 담당 기관 내 전담 조직 구성\n"
-                "• 피해자·이해관계자 지원 체계 마련"
-            ),
-            expected_effects=(
-                "• 문제 해소를 통한 국민 생활 개선\n"
-                "• 관련 피해 및 불편 감소\n"
-                "• 정책 신뢰도 및 행정 효율 향상"
-            ),
+            core_requests=core_requests,
+            expected_effects=expected_effects,
             responsible_dept=responsible_dept,
-            related_laws=[],
-            executive_summary=None,
-            win_theme=None,
-            proof_points=None,
+            related_laws=_default_laws_for_dept(responsible_dept),
+            executive_summary=_fallback_summary(title, structured_problem),
+            win_theme=getattr(structured_problem, "win_theme", None),
+            proof_points=_fallback_proof_points(user_input, structured_problem),
         )

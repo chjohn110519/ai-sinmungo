@@ -45,9 +45,9 @@ interface Improvement {
 
 interface TrendingKeyword {
   keyword: string
+  topic?: string | null
   total_count: number
   cluster_id?: string | null
-  topic?: string | null
 }
 
 interface AnalysisPreview {
@@ -1028,24 +1028,24 @@ export default function ConversationBox() {
           {aggregatedData.trending_keywords && aggregatedData.trending_keywords.length > 0 && (
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-gray-800">🔥 지금 핫한 키워드</h3>
+                <h3 className="font-semibold text-gray-800">🔥 지금 핫한 주제</h3>
                 <Link href="/clusters" className="text-xs text-blue-600 hover:underline">전체 보기 →</Link>
               </div>
               <div className="space-y-2">
                 {(() => {
                   const maxCount = aggregatedData.trending_keywords![0].total_count || 1
                   return aggregatedData.trending_keywords!.slice(0, 5).map((item, i) => (
-                    <div key={item.keyword} className="flex items-center gap-2.5">
+                    <div key={item.topic || item.keyword} className="flex items-center gap-2.5">
                       <span className="text-xs font-bold text-gray-400 w-4 flex-shrink-0">{i + 1}</span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between mb-0.5">
                           {item.cluster_id ? (
                             <Link href={`/cluster/${item.cluster_id}`}
                               className="text-sm font-medium text-blue-700 hover:underline truncate">
-                              {item.keyword}
+                              {item.topic || item.keyword}
                             </Link>
                           ) : (
-                            <span className="text-sm font-medium text-gray-800 truncate">{item.keyword}</span>
+                            <span className="text-sm font-medium text-gray-800 truncate">{item.topic || item.keyword}</span>
                           )}
                           <span className="text-xs text-gray-400 ml-2 flex-shrink-0">{item.total_count}</span>
                         </div>

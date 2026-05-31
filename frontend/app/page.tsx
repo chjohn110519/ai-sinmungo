@@ -7,21 +7,21 @@ import ConversationBox from '@/components/ConversationBox'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 
-interface TrendingKeyword {
+interface TrendingTopic {
   keyword: string
+  topic?: string | null
   total_count: number
   cluster_id?: string | null
-  topic?: string | null
 }
 
 export default function Home() {
-  const [trending, setTrending] = useState<TrendingKeyword[]>([])
+  const [trending, setTrending] = useState<TrendingTopic[]>([])
 
   useEffect(() => {
     const load = () =>
-      fetch(`${API_BASE}/api/clusters/trending-keywords`)
+      fetch(`${API_BASE}/api/clusters/trending-topics`)
         .then(r => r.json())
-        .then(d => setTrending(d.trending_keywords || []))
+        .then(d => setTrending(d.trending_topics || d.trending_keywords || []))
         .catch(() => {})
     load()
     const t = setInterval(load, 30000)
@@ -77,10 +77,10 @@ export default function Home() {
               </p>
             </div>
 
-            {/* 핫 키워드 TOP 5 */}
+            {/* 핫 주제 TOP 5 */}
             <div className="rounded-2xl bg-white border border-gray-200 p-6 shadow-md">
               <div className="flex items-center justify-between mb-4">
-                <h4 className="font-bold text-gray-900">🔥 지금 핫한 키워드</h4>
+                <h4 className="font-bold text-gray-900">🔥 지금 핫한 주제</h4>
                 <Link href="/clusters" className="text-xs text-blue-600 hover:underline">전체 보기 →</Link>
               </div>
               {trending.length === 0 ? (
@@ -88,16 +88,16 @@ export default function Home() {
               ) : (
                 <div className="space-y-2.5">
                   {trending.map((item, i) => (
-                    <div key={item.keyword} className="flex items-center gap-3">
+                    <div key={item.topic || item.keyword} className="flex items-center gap-3">
                       <span className="text-xs font-bold text-gray-400 w-4 flex-shrink-0">{i + 1}</span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between mb-1">
                           {item.cluster_id ? (
                           <Link href={`/cluster/${item.cluster_id}`} className="text-sm font-medium text-blue-700 hover:underline truncate">
-                            {item.keyword}
+                            {item.topic || item.keyword}
                           </Link>
                         ) : (
-                          <span className="text-sm font-medium text-gray-800 truncate">{item.keyword}</span>
+                          <span className="text-sm font-medium text-gray-800 truncate">{item.topic || item.keyword}</span>
                         )}
                           <span className="text-xs text-gray-500 ml-2 flex-shrink-0">{item.total_count}</span>
                         </div>

@@ -31,6 +31,41 @@ def _cluster_to_dict(c) -> dict:
     }
 
 
+def _topic_trends(db: DBSession, limit: int) -> list[dict]:
+    """클러스터 count를 주제별로 합산한다.
+
+    기존 키워드 집계는 하나의 클러스터 count가 여러 키워드에 중복 반영되어
+    집계 현황의 참여 수와 메인 화면 수치가 다르게 보였다. 주제별 집계는
+    클러스터 count를 한 번만 더하므로 시민 제안 집계 현황과 의미가 일치한다.
+    """
+    clusters = db.query(ProposalCluster).all()
+    topic_weights: dict[str, int] = {}
+    topic_best: dict[str, dict] = {}
+
+    for c in clusters:
+        topic = (c.topic or "기타").strip() or "기타"
+        topic_weights[topic] = topic_weights.get(topic, 0) + c.count
+        prev = topic_best.get(topic)
+        if prev is None or c.count > prev["count"]:
+            topic_best[topic] = {
+                "cluster_id": c.cluster_id,
+                "topic": topic,
+                "count": c.count,
+            }
+
+    trending = sorted(topic_weights.items(), key=lambda x: x[1], reverse=True)[:limit]
+    return [
+        {
+            # 기존 프론트 호환용: keyword 필드에는 주제명을 넣는다.
+            "keyword": topic,
+            "topic": topic,
+            "total_count": cnt,
+            "cluster_id": topic_best.get(topic, {}).get("cluster_id"),
+        }
+        for topic, cnt in trending
+    ]
+
+
 @router.get("/cluster/{cluster_id}")
 async def get_cluster(cluster_id: str, db: DBSession = Depends(get_db)):
     """특정 클러스터의 집계 현황 조회."""
@@ -60,33 +95,27 @@ async def get_trending_keywords(
     limit: int = Query(10, ge=1, le=30),
     db: DBSession = Depends(get_db),
 ):
-    """클러스터 키워드를 count 가중치로 집계한 인기 키워드 TOP N (cluster_id 포함)."""
-    clusters = db.query(ProposalCluster).all()
-    keyword_weights: dict[str, int] = {}
-    keyword_best: dict[str, dict] = {}  # kw → {cluster_id, topic, count}
+    """인기 주제 TOP N.
 
-    for c in clusters:
-        for kw in (c.keywords or []):
-            keyword_weights[kw] = keyword_weights.get(kw, 0) + c.count
-            prev = keyword_best.get(kw)
-            if prev is None or c.count > prev["count"]:
-                keyword_best[kw] = {
-                    "cluster_id": c.cluster_id,
-                    "topic": c.topic,
-                    "count": c.count,
-                }
-
-    trending = sorted(keyword_weights.items(), key=lambda x: x[1], reverse=True)[:limit]
+    경로명은 하위 호환을 위해 유지하지만, 실제 집계 기준은 키워드가 아니라 주제다.
+    """
+    trending = _topic_trends(db, limit)
     return {
-        "trending_keywords": [
-            {
-                "keyword": kw,
-                "total_count": cnt,
-                "cluster_id": keyword_best.get(kw, {}).get("cluster_id"),
-                "topic": keyword_best.get(kw, {}).get("topic"),
-            }
-            for kw, cnt in trending
-        ]
+        "trending_keywords": trending,
+        "trending_topics": trending,
+    }
+
+
+@router.get("/clusters/trending-topics")
+async def get_trending_topics(
+    limit: int = Query(10, ge=1, le=30),
+    db: DBSession = Depends(get_db),
+):
+    """클러스터 count를 주제별로 합산한 인기 주제 TOP N."""
+    trending = _topic_trends(db, limit)
+    return {
+        "trending_topics": trending,
+        "trending_keywords": trending,
     }
 
 

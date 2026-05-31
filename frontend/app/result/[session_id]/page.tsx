@@ -31,6 +31,7 @@ interface SessionResult {
         predicted_law_result: string
         top_progress_stages: Array<{ label: string; probability: number }>
       } | null
+      duration_source?: string | null
     }
   } | null
   draft_analysis?: {
@@ -218,15 +219,15 @@ export default function ResultPage() {
 
             <div>
               <h2 className="font-semibold text-gray-800 mb-1">제안 배경</h2>
-              <p className="text-sm text-gray-700 leading-relaxed">{proposal.background}</p>
+              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{proposal.background}</p>
             </div>
             <div>
               <h2 className="font-semibold text-gray-800 mb-1">주요 내용</h2>
-              <p className="text-sm text-gray-700 leading-relaxed">{proposal.core_requests}</p>
+              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{proposal.core_requests}</p>
             </div>
             <div>
               <h2 className="font-semibold text-gray-800 mb-1">기대 효과</h2>
-              <p className="text-sm text-gray-700 leading-relaxed">{proposal.expected_effects}</p>
+              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{proposal.expected_effects}</p>
             </div>
             {proposal.related_laws.length > 0 && (
               <div>
@@ -357,14 +358,14 @@ export default function ResultPage() {
                 <p className="text-xs text-gray-500">예상 소요일</p>
                 <div className="flex items-end gap-2">
                   <span className="text-xl font-bold text-gray-400">
-                    {result.draft_analysis.expected_duration_days}일
+                    {result.draft_analysis?.expected_duration_days ?? '-'}일
                   </span>
                   <span className="text-blue-500 text-sm mb-0.5">→</span>
                   <span className="text-2xl font-bold text-purple-600">
                     {analysis.expected_duration_days}일
                   </span>
                 </div>
-                {analysis.expected_duration_days < result.draft_analysis.expected_duration_days && (
+                {result.draft_analysis && analysis.expected_duration_days < result.draft_analysis.expected_duration_days && (
                   <p className="text-xs text-purple-600 font-medium">
                     {result.draft_analysis.expected_duration_days - analysis.expected_duration_days}일 단축
                   </p>
@@ -385,6 +386,9 @@ export default function ResultPage() {
               <div className="bg-white rounded-2xl shadow-md p-5 text-center">
                 <p className="text-xs text-gray-500 mb-1">예상 소요 기간</p>
                 <p className="text-3xl font-bold text-purple-600">{analysis.expected_duration_days}일</p>
+                {analysis.visualization_data?.duration_source === 'predicted_date_of_approval'
+                  ? <span className="text-xs text-emerald-600 font-medium mt-1 inline-block">ML 예측</span>
+                  : <span className="text-xs text-gray-400 mt-1 inline-block">기본값</span>}
               </div>
             </div>
 
