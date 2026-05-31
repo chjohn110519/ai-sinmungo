@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import BrandLogo from '@/components/BrandLogo'
 import ConversationBox from '@/components/ConversationBox'
@@ -16,6 +17,17 @@ interface TrendingTopic {
 
 export default function Home() {
   const [trending, setTrending] = useState<TrendingTopic[]>([])
+  const searchParams = useSearchParams()
+  const fromCluster = searchParams.get('cluster')
+
+  // 집계현황에서 "의견 제출하기" 로 넘어온 경우 chat 섹션으로 스크롤
+  useEffect(() => {
+    if (fromCluster) {
+      setTimeout(() => {
+        document.getElementById('chat')?.scrollIntoView({ behavior: 'smooth' })
+      }, 150)
+    }
+  }, [fromCluster])
 
   useEffect(() => {
     const load = () =>
@@ -47,6 +59,14 @@ export default function Home() {
       </nav>
 
       <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
+        {/* 집계현황에서 "의견 제출하기"로 넘어온 경우 컨텍스트 안내 배너 */}
+        {fromCluster && (
+          <div className="mb-4 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm text-blue-700 flex items-center gap-2">
+            <span>💬</span>
+            <span>집계 중인 주제에 의견을 추가합니다. 유사한 내용이면 자동으로 같은 집계에 반영됩니다.</span>
+          </div>
+        )}
+
         <section id="chat" className="grid gap-8 lg:grid-cols-[1fr_0.9fr]">
           {/* 좌측: 입력 박스 */}
           <div className="rounded-3xl border border-gray-200 bg-white p-8 shadow-lg">

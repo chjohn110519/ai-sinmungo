@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Users, TrendingUp, CheckCircle, ArrowLeft, FileText, Clock, ChevronDown, ChevronUp, MessageSquare } from 'lucide-react'
 
@@ -83,6 +83,7 @@ function OpinionCard({ op }: { op: Opinion }) {
 export default function ClusterPage() {
   const params = useParams()
   const clusterId = params?.cluster_id as string
+  const router = useRouter()
 
   const [cluster, setCluster] = useState<ClusterData | null>(null)
   const [opinions, setOpinions] = useState<Opinion[]>([])
@@ -266,12 +267,12 @@ export default function ClusterPage() {
           <p className="text-blue-100 text-sm">
             아래에서 의견을 제출하면 이 집계에 자동으로 반영됩니다.
           </p>
-          <Link
-            href="/#chat"
-            className="inline-block px-6 py-2.5 bg-white text-blue-600 rounded-xl font-semibold hover:bg-blue-50 transition-colors text-sm"
+          <button
+            onClick={() => router.push(`/?cluster=${clusterId}`)}
+            className="inline-block px-6 py-2.5 bg-white text-blue-600 rounded-xl font-semibold hover:bg-blue-50 transition-colors text-sm cursor-pointer"
           >
             의견 제출하기
-          </Link>
+          </button>
         </div>
 
         {/* 메타 정보 */}
