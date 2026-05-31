@@ -5,6 +5,7 @@ OpenAI SDK 대신 httpx를 직접 사용:
 - httpx는 이미 FastAPI 의존성에 포함되어 있어 별도 설치 불필요
 """
 
+import os
 from io import BytesIO
 from pathlib import Path
 
@@ -27,7 +28,8 @@ async def transcribe_audio(audio_data: bytes, filename: str = "recording.webm") 
         httpx.HTTPStatusError: Whisper API 오류 응답
         httpx.RequestError: 네트워크 연결 실패
     """
-    api_key = (settings.openai_api_key or "").strip()
+    # pydantic-settings fallback: Railway 환경변수를 직접 읽어 보정
+    api_key = (settings.openai_api_key or os.environ.get("OPENAI_API_KEY") or "").strip()
     if not api_key:
         raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다.")
 
