@@ -491,7 +491,7 @@ export default function ConversationBox() {
       <div className="flex items-center gap-1 mb-6">
         {stages.map((s, i) => (
           <div key={s.key} className="flex items-center flex-1">
-            <div className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full transition-all ${
+            <div className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full whitespace-nowrap transition-all ${
               i < currentStageIdx ? 'bg-blue-100 text-blue-700' :
               i === currentStageIdx ? 'bg-blue-600 text-white' :
               'bg-gray-100 text-gray-400'
