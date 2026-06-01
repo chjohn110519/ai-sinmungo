@@ -732,19 +732,11 @@ export default function ConversationBox() {
               <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider">🤖 AI 사전 분석</p>
 
               {/* 점수 행 */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-white rounded-lg px-3 py-2 text-center border border-blue-100">
-                  <p className="text-xs text-gray-500 mb-0.5">실현 가능성</p>
-                  <p className="text-lg font-bold text-blue-600">
-                    {Math.round(improvingData.analysis.feasibility_score * 100)}%
-                  </p>
-                </div>
-                <div className="bg-white rounded-lg px-3 py-2 text-center border border-blue-100">
-                  <p className="text-xs text-gray-500 mb-0.5">통과 확률</p>
-                  <p className="text-lg font-bold text-emerald-600">
-                    {Math.round(improvingData.analysis.pass_probability * 100)}%
-                  </p>
-                </div>
+              <div className="bg-white rounded-lg px-3 py-2 text-center border border-blue-100">
+                <p className="text-xs text-gray-500 mb-0.5">통과 확률</p>
+                <p className="text-lg font-bold text-emerald-600">
+                  {Math.round(improvingData.analysis.pass_probability * 100)}%
+                </p>
               </div>
 
               {/* 소관 위원회 추천 */}

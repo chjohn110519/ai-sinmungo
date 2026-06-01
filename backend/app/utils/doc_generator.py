@@ -216,13 +216,11 @@ def generate_docx(
     if analysis:
         _heading(doc, f"{section_num}. AI 분석 결과")
 
-        analysis_table = doc.add_table(rows=3, cols=2)
+        analysis_table = doc.add_table(rows=2, cols=2)
         analysis_table.style = "Table Grid"
-        feasibility = analysis.get("feasibility_score", 0)
         pass_prob = analysis.get("pass_probability", 0)
         duration = analysis.get("expected_duration_days", 0)
         metrics = [
-            ("실현 가능성", f"{feasibility * 100:.0f}%"),
             ("처리 통과 예상 확률", f"{pass_prob * 100:.0f}%"),
             ("예상 처리 기간", f"약 {duration}일"),
         ]
