@@ -468,7 +468,7 @@ async def conversation_answer(req: AnswerRequest, db: DBSession = Depends(get_db
         _visual = _visualizer.visualize(_proposal_obj, _review, cases, classification)
         analysis_preview = {
             "feasibility_score": _visual.feasibility_score,
-            "pass_probability": _visual.pass_probability,
+            "pass_probability": round(_visual.pass_probability * 0.75, 3),  # 초안은 보수적으로 표시
             "expected_duration_days": _visual.expected_duration_days,
             "visualization_data": _visual.chart_data or {},
         }

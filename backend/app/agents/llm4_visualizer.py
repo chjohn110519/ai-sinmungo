@@ -44,7 +44,7 @@ class LLM4Visualizer:
         stage_predictions: dict | None = None
         detailed = registry.predict_pass_detailed(proposal_text)
         if detailed is not None:
-            pass_probability = round(float(detailed["pass_probability"]) * 0.75, 3)
+            pass_probability = round(float(detailed["pass_probability"]), 3)
             stage_predictions = {
                 "predicted_progress_stage": detailed["predicted_progress_stage"],
                 "predicted_proc_result": detailed["predicted_proc_result"],
@@ -55,7 +55,7 @@ class LLM4Visualizer:
         else:
             # 기존 휴리스틱 fallback (KoBERT 비활성화 또는 오류 시)
             crowd_bonus = min(cluster_count / 1000.0, 0.15) if cluster_count > 0 else 0.0
-            pass_probability = round(max(0.20, min(0.65, (feasibility_score + crowd_bonus) * 0.80)), 3)
+            pass_probability = round(max(0.30, min(0.95, feasibility_score + crowd_bonus)), 3)
 
         # committee_recommendations: ML 모델 사용, 오류 시 빈 리스트
         committee_recs = registry.recommend_committees(proposal_text, top_k=5)
