@@ -313,7 +313,6 @@ class LLM1Structurer:
         discriminators_str = ", ".join(structured_problem.discriminators or []) or "없음"
 
         # ── 웹 검색 컨텍스트 블록 구성 ────────────────────────────────────────
-        web_block = ""
         if web_context:
             lines = ["[실제 검색 결과 — 아래 내용만 인용 허용]"]
             for i, r in enumerate(web_context[:8], 1):
@@ -327,6 +326,16 @@ class LLM1Structurer:
                 "근거가 불확실한 경우 '(출처 확인 필요)'로 표기하세요."
             )
             web_block = "\n".join(lines) + "\n\n"
+        else:
+            # 검색 결과 없음 → 수치 날조 절대 금지
+            web_block = (
+                "[검색 결과 없음]\n"
+                "⚠️ 웹 검색 결과가 제공되지 않았습니다. "
+                "background, proof_points, expected_effects 등 모든 필드에서 "
+                "구체적인 수치·통계·사례·날짜를 절대 생성하지 마세요. "
+                "사용자가 직접 제공한 정보만 사용하고, 수치가 필요한 자리는 "
+                "'(관련 통계 확인 필요)' 또는 '구체적 수치는 담당 기관 확인 필요'로 대체하세요.\n\n"
+            )
 
         prompt = f"""{web_block}[입력 정보]
 민원/제안 내용 (원본 + Q&A 추가 정보 포함):

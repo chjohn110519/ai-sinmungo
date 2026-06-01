@@ -591,10 +591,14 @@ async def conversation_finalize(req: FinalizeRequest, db: DBSession = Depends(ge
     if chart.get("top_committee"):
         final_proposal["responsible_dept"] = chart["top_committee"]
 
+    # AI 개선 적용 후 확률이 초안보다 낮아지지 않도록 보정
+    draft_pass_prob = (ctx.get("draft_analysis") or {}).get("pass_probability", 0)
+    final_pass_prob = max(visual.pass_probability, draft_pass_prob)
+
     # DOCX 생성
     analysis_dict = {
         "feasibility_score": visual.feasibility_score,
-        "pass_probability": visual.pass_probability,
+        "pass_probability": final_pass_prob,
         "expected_duration_days": visual.expected_duration_days,
         "visualization_data": chart,  # result 페이지 BarChart + 위원회 추천 + stage_predictions
     }
@@ -624,7 +628,7 @@ async def conversation_finalize(req: FinalizeRequest, db: DBSession = Depends(ge
             analysis_id=str(uuid.uuid4()),
             proposal_id=proposal_id,
             similar_cases=similar_cases,
-            pass_probability=visual.pass_probability,
+            pass_probability=final_pass_prob,
             expected_duration_days=visual.expected_duration_days,
             feasibility_score=visual.feasibility_score,
             visualization_data=visual.chart_data,
