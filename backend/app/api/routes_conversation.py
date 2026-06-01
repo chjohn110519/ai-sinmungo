@@ -247,6 +247,21 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
     # 분류
     routing = _router_agent.route_message(full_message)
 
+    # ── 위원회 분류 (클러스터 배정 전에 실행 — 위원회명을 매칭 키로 사용) ────────
+    start_committee_recs: list[dict] = []
+    top_committee: str = routing.responsible_dept
+    top_committee_confidence: float = routing.confidence
+    try:
+        from app.ml import get_registry as _get_registry
+        _reg = _get_registry()
+        start_committee_recs = _reg.recommend_committees(full_message, top_k=3)
+        if start_committee_recs:
+            top_committee = start_committee_recs[0]["committee"]
+            top_committee_confidence = start_committee_recs[0]["confidence"]
+    except Exception as _ce:
+        logger.warning("TURN1 위원회 분류 오류 (무시됨): %s", _ce)
+    # ─────────────────────────────────────────────────────────────────────────
+
     # 제안/청원인 경우 클러스터 배정 (Agent 1 집계 로직)
     cluster_id: str | None = None
     cluster_count: int = 0
@@ -260,7 +275,7 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
                 topic=routing.topic,
                 keywords=routing.keywords,
                 classification=routing.classification,
-                responsible_dept=routing.responsible_dept,
+                responsible_dept=top_committee,  # 라우터 부처명 대신 위원회명 사용
             )
             cluster_id = cluster.cluster_id
             cluster_count = cluster.count
@@ -299,21 +314,6 @@ async def conversation_start(req: StartRequest, db: DBSession = Depends(get_db))
 
     # 명확화 질문 생성
     questions = await _questioner.generate(full_message, routing.classification, n=5)
-
-    # ── 위원회 분류 (TF-IDF 기반, KoBERT 불필요) ──────────────────────────────
-    start_committee_recs: list[dict] = []
-    top_committee: str = routing.responsible_dept
-    top_committee_confidence: float = routing.confidence
-    try:
-        from app.ml import get_registry as _get_registry
-        _reg = _get_registry()
-        start_committee_recs = _reg.recommend_committees(full_message, top_k=3)
-        if start_committee_recs:
-            top_committee = start_committee_recs[0]["committee"]
-            top_committee_confidence = start_committee_recs[0]["confidence"]
-    except Exception as _ce:
-        logger.warning("TURN1 위원회 분류 오류 (무시됨): %s", _ce)
-    # ─────────────────────────────────────────────────────────────────────────
 
     ctx = {
         "stage": "questioning",

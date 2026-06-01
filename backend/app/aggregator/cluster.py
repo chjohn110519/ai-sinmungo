@@ -17,7 +17,8 @@ from app.storage.models import ProposalCluster
 
 _TOPIC_ALIASES: dict[str, list[str]] = {
     "교통": ["도로", "버스", "지하철", "주차", "신호", "교통"],
-    "환경": ["환경", "쓰레기", "미세먼지", "공기", "소음", "하천"],
+    "환경": ["환경", "쓰레기", "미세먼지", "공기", "소음", "하천",
+             "탄소", "배출", "대기", "공기질", "기후", "온실가스", "오염", "재활용"],
     "주거": ["주택", "아파트", "임대", "전세", "주거", "건물"],
     "복지": ["복지", "장애", "노인", "아동", "청소년", "사회서비스"],
     "교육": ["교육", "학교", "학원", "교사", "급식", "입시"],
@@ -37,19 +38,60 @@ def _normalize_topic(topic: str) -> str:
     return "기타"
 
 
+def _kw_match(a: str, b: str) -> bool:
+    """두 키워드의 부분 일치 여부 (포함 관계 인식).
+
+    예: "배출" == "배출가스", "미세먼지" == "미세먼지" 모두 True.
+    길이 2자 미만은 정확 일치만 허용 (너무 짧은 단어의 오매칭 방지).
+    """
+    if a == b:
+        return True
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    return len(short) >= 2 and long.startswith(short)
+
+
 def _keyword_overlap(kws_a: list[str], kws_b: list[str]) -> float:
-    """두 키워드 목록의 Jaccard 유사도."""
+    """두 키워드 목록의 유사도 (부분 일치 포함 Jaccard).
+
+    정확 일치 + 포함 관계(prefix) 를 모두 매칭으로 인정한다.
+    예) ["배출가스", "환경"] vs ["배출", "환경", "법안"] → "배출가스"≈"배출" 포함 인식.
+    """
     if not kws_a or not kws_b:
         return 0.0
-    set_a = {k.strip() for k in kws_a}
-    set_b = {k.strip() for k in kws_b}
-    intersection = set_a & set_b
-    union = set_a | set_b
-    return len(intersection) / len(union)
+    list_a = [k.strip() for k in kws_a]
+    list_b = [k.strip() for k in kws_b]
+
+    matched_a: set[int] = set()
+    matched_b: set[int] = set()
+    for i, a in enumerate(list_a):
+        for j, b in enumerate(list_b):
+            if _kw_match(a, b):
+                matched_a.add(i)
+                matched_b.add(j)
+
+    # 유효 교집합 크기: 매칭된 인덱스 수의 평균
+    intersection = (len(matched_a) + len(matched_b)) / 2
+    union = len(list_a) + len(list_b) - intersection
+    return intersection / union if union > 0 else 0.0
 
 
 class ClusterManager:
-    KEYWORD_THRESHOLD = 0.6  # 키워드 과반수 이상 공유해야 같은 클러스터 (엄격한 주제 일치 보장)
+    KEYWORD_THRESHOLD = 0.35       # 같은 타입(classification) + 주제 매칭
+    DEPT_KEYWORD_THRESHOLD = 0.25  # 위원회명 일치 시 완화된 키워드 임계값
+    CROSS_TYPE_THRESHOLD = 0.50    # 타입 불문 주제 교차 매칭 임계값
+
+    def _best_by_keyword(
+        self, candidates: list, keywords: List[str]
+    ) -> tuple:
+        """후보 클러스터 중 키워드 유사도 최고를 반환 → (cluster, score)."""
+        best: Optional[ProposalCluster] = None
+        best_score = 0.0
+        for c in candidates:
+            score = _keyword_overlap(keywords, c.keywords or [])
+            if score > best_score:
+                best_score = score
+                best = c
+        return best, best_score
 
     def find_matching_cluster(
         self,
@@ -59,10 +101,16 @@ class ClusterManager:
         classification: str,
         responsible_dept: str,
     ) -> Optional[ProposalCluster]:
-        """topic과 keywords가 유사한 기존 클러스터를 반환. 없으면 None."""
+        """topic·keywords·위원회명이 유사한 기존 클러스터를 반환. 없으면 None.
+
+        Phase 1 — 동일 타입 + 동일 주제, keyword overlap ≥ 0.35 (기존 로직)
+        Phase 2 — 동일 위원회명, keyword overlap ≥ 0.25 (위원회명 기반 매칭)
+        Phase 3 — 동일 주제 (타입 무관), keyword overlap ≥ 0.50 (교차 타입 매칭)
+        """
         normalized = _normalize_topic(topic)
 
-        candidates = (
+        # Phase 1: 같은 타입 + 같은 주제
+        phase1 = (
             db.query(ProposalCluster)
             .filter(
                 ProposalCluster.classification == classification,
@@ -70,17 +118,31 @@ class ClusterManager:
             )
             .all()
         )
-
-        best: Optional[ProposalCluster] = None
-        best_score = 0.0
-        for c in candidates:
-            score = _keyword_overlap(keywords, c.keywords or [])
-            if score > best_score:
-                best_score = score
-                best = c
-
+        best, best_score = self._best_by_keyword(phase1, keywords)
         if best_score >= self.KEYWORD_THRESHOLD:
             return best
+
+        # Phase 2: 위원회명 일치 (타입/주제 불문)
+        if responsible_dept:
+            phase2 = (
+                db.query(ProposalCluster)
+                .filter(ProposalCluster.responsible_dept == responsible_dept)
+                .all()
+            )
+            best2, score2 = self._best_by_keyword(phase2, keywords)
+            if score2 >= self.DEPT_KEYWORD_THRESHOLD:
+                return best2
+
+        # Phase 3: 같은 주제 교차 타입 (제안 ↔ 청원)
+        phase3 = (
+            db.query(ProposalCluster)
+            .filter(ProposalCluster.topic == normalized)
+            .all()
+        )
+        best3, score3 = self._best_by_keyword(phase3, keywords)
+        if score3 >= self.CROSS_TYPE_THRESHOLD:
+            return best3
+
         return None
 
     def get_or_create_cluster(
