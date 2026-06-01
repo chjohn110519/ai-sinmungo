@@ -110,31 +110,44 @@ export default function ComplaintsPage() {
 
   const fetchData = useCallback(() => {
     setLoading(true)
-    const params = new URLSearchParams({ page: String(page), page_size: '15' })
-    if (statusFilter) params.set('status', statusFilter)
-    if (classFilter) params.set('classification', classFilter)
 
-    fetch(`${API_BASE}/api/sessions?${params}`)
-      .then((r) => {
-        if (!r.ok) throw new Error('api_error')
-        return r.json()
-      })
-      .then((apiData) => {
-        // API 성공이면 빈 결과라도 그대로 사용 (데이터 소스 혼용 방지)
-        setData(apiData)
-      })
-      .catch(() => {
-        // API 자체 실패(네트워크 오류 / non-ok) 시에만 localStorage 폴백
-        setData(getLocalComplaints(statusFilter, classFilter, page))
-      })
-      .finally(() => setLoading(false))
-  }, [page, statusFilter, classFilter])
+    if (myOnly) {
+      // 내 접수만: 전체 목록을 한 번에 받아 myIds로 필터 후 로컬 페이지네이션
+      const params = new URLSearchParams({ page: '1', page_size: '500' })
+      if (statusFilter) params.set('status', statusFilter)
+      fetch(`${API_BASE}/api/sessions?${params}`)
+        .then((r) => r.ok ? r.json() : Promise.reject())
+        .then((apiData) => {
+          const filtered = (apiData.items || [])
+            .filter((i: ComplaintItem) => myIds.has(i.session_id))
+            .filter((i: ComplaintItem) => !classFilter || i.classification === classFilter)
+          const total = filtered.length
+          setData({
+            total,
+            page,
+            page_size: 15,
+            total_pages: Math.max(1, Math.ceil(total / 15)),
+            items: filtered.slice((page - 1) * 15, page * 15),
+          })
+        })
+        .catch(() => setData(getLocalComplaints(statusFilter, classFilter, page)))
+        .finally(() => setLoading(false))
+    } else {
+      // 전체 보기: 서버 페이지네이션
+      const params = new URLSearchParams({ page: String(page), page_size: '15' })
+      if (statusFilter) params.set('status', statusFilter)
+      if (classFilter) params.set('classification', classFilter)
+      fetch(`${API_BASE}/api/sessions?${params}`)
+        .then((r) => r.ok ? r.json() : Promise.reject())
+        .then((apiData) => setData(apiData))
+        .catch(() => setData(getLocalComplaints(statusFilter, classFilter, page)))
+        .finally(() => setLoading(false))
+    }
+  }, [page, statusFilter, classFilter, myOnly, myIds])
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  const displayItems = myOnly
-    ? (data?.items ?? []).filter((i) => myIds.has(i.session_id))
-    : (data?.items ?? [])
+  const displayItems = data?.items ?? []
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -147,7 +160,7 @@ export default function ComplaintsPage() {
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => setMyOnly((v) => !v)}
+              onClick={() => { setMyOnly((v) => !v); setPage(1) }}
               className={`px-3 py-1.5 text-sm rounded-lg border transition ${
                 myOnly ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
               }`}
