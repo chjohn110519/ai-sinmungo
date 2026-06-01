@@ -15,8 +15,27 @@ interface TrendingTopic {
   cluster_id?: string | null
 }
 
+interface ClusterData {
+  cluster_id: string
+  topic: string
+  keywords: string[]
+  responsible_dept: string
+  classification: string
+  count: number
+  threshold: number
+  triggered: boolean
+  progress_percent: number
+}
+
+interface Opinion {
+  session_id: string
+  message: string
+}
+
 export default function Home() {
   const [trending, setTrending] = useState<TrendingTopic[]>([])
+  const [clusterData, setClusterData] = useState<ClusterData | null>(null)
+  const [clusterOpinions, setClusterOpinions] = useState<Opinion[]>([])
   const searchParams = useSearchParams()
   const fromCluster = searchParams.get('cluster')
 
@@ -27,6 +46,18 @@ export default function Home() {
         document.getElementById('chat')?.scrollIntoView({ behavior: 'smooth' })
       }, 150)
     }
+  }, [fromCluster])
+
+  // 클러스터 ID가 있으면 해당 클러스터 정보 + 의견 예시 fetch
+  useEffect(() => {
+    if (!fromCluster) return
+    Promise.all([
+      fetch(`${API_BASE}/api/cluster/${fromCluster}`).then(r => r.ok ? r.json() : null),
+      fetch(`${API_BASE}/api/cluster/${fromCluster}/opinions`).then(r => r.ok ? r.json() : { opinions: [] }),
+    ]).then(([cd, od]) => {
+      if (cd) setClusterData(cd)
+      setClusterOpinions((od?.opinions ?? []).filter((o: Opinion) => o.message))
+    }).catch(() => {})
   }, [fromCluster])
 
   useEffect(() => {
@@ -77,63 +108,117 @@ export default function Home() {
             <ConversationBox />
           </div>
 
-          {/* 우측: 안내 카드 */}
-          <div className="space-y-6">
-            <div className="rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 p-6 shadow-md">
-              <h4 className="text-lg font-bold text-blue-900 mb-3">뭐든 자유롭게 말씀하세요</h4>
-              <ul className="space-y-2 text-sm text-blue-800">
-                <li>• "○○ 제도가 불합리합니다" (민원)</li>
-                <li>• "청년 주거 지원을 이렇게 바꾸면 어떨까요" (제안)</li>
-                <li>• "○○법을 개정해야 합니다" (청원)</li>
-                <li>• AI가 자동으로 분류하고 집계합니다</li>
-              </ul>
-            </div>
-
-            <div className="rounded-2xl bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200 p-6 shadow-md">
-              <h4 className="text-lg font-bold text-amber-900 mb-3">🔗 함께할수록 강해집니다</h4>
-              <p className="text-sm text-amber-800">
-                같은 방향의 의견이 모일수록 집계 카운트가 올라가고,
-                목표에 도달하면 AI가 공식 제안서를 자동 생성합니다.
-              </p>
-            </div>
-
-            {/* 핫 주제 TOP 5 */}
-            <div className="rounded-2xl bg-white border border-gray-200 p-6 shadow-md">
-              <div className="flex items-center justify-between mb-4">
-                <h4 className="font-bold text-gray-900">🔥 지금 핫한 주제</h4>
-                <Link href="/clusters" className="text-xs text-blue-600 hover:underline">전체 보기 →</Link>
+          {/* 우측: 클러스터 컨텍스트 (fromCluster) 또는 기본 안내 카드 */}
+          {fromCluster && clusterData ? (
+            <div className="space-y-4">
+              {/* 클러스터 헤더 */}
+              <div className="rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 p-5 text-white shadow-md">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-white/20 font-medium">{clusterData.classification}</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-white/20 font-medium">{clusterData.topic}</span>
+                </div>
+                <p className="text-sm text-blue-100 mb-1">{clusterData.responsible_dept}</p>
+                <p className="text-xl font-bold">{clusterData.count.toLocaleString()}명이 이미 참여 중</p>
+                <div className="mt-3 space-y-1">
+                  <div className="w-full h-1.5 bg-white/30 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-white rounded-full"
+                      style={{ width: `${Math.min(clusterData.progress_percent, 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-blue-100">목표 {clusterData.threshold.toLocaleString()}명까지 {clusterData.progress_percent}% 달성</p>
+                </div>
               </div>
-              {trending.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-4">아직 집계된 데이터가 없습니다</p>
-              ) : (
-                <div className="space-y-2.5">
-                  {trending.map((item, i) => (
-                    <div key={item.topic || item.keyword} className="flex items-center gap-3">
-                      <span className="text-xs font-bold text-gray-400 w-4 flex-shrink-0">{i + 1}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-1">
-                          {item.cluster_id ? (
-                          <Link href={`/cluster/${item.cluster_id}`} className="text-sm font-medium text-blue-700 hover:underline truncate">
-                            {item.topic || item.keyword}
-                          </Link>
-                        ) : (
-                          <span className="text-sm font-medium text-gray-800 truncate">{item.topic || item.keyword}</span>
-                        )}
-                          <span className="text-xs text-gray-500 ml-2 flex-shrink-0">{item.total_count}</span>
-                        </div>
-                        <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-gradient-to-r from-blue-400 to-blue-600"
-                            style={{ width: `${Math.round((item.total_count / maxCount) * 100)}%` }}
-                          />
-                        </div>
-                      </div>
+
+              {/* 관련 키워드 */}
+              <div className="rounded-2xl bg-white border border-gray-200 p-5 shadow-sm">
+                <p className="text-sm font-semibold text-gray-700 mb-3">🔑 관련 키워드</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {clusterData.keywords.map(kw => (
+                    <span key={kw} className="px-2.5 py-1 bg-blue-50 border border-blue-200 text-blue-700 text-xs rounded-full">
+                      {kw}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* 제출된 의견 예시 */}
+              {clusterOpinions.length > 0 && (
+                <div className="rounded-2xl bg-white border border-gray-200 p-5 shadow-sm space-y-3">
+                  <p className="text-sm font-semibold text-gray-700">💬 제출된 의견 예시</p>
+                  {clusterOpinions.slice(0, 3).map((op, i) => (
+                    <div key={i} className="bg-gray-50 rounded-xl border border-gray-100 p-3">
+                      <p className="text-sm text-gray-700 line-clamp-3 leading-relaxed">{op.message}</p>
                     </div>
                   ))}
                 </div>
               )}
+
+              <Link
+                href={`/cluster/${fromCluster}`}
+                className="block text-center text-xs text-blue-600 hover:underline py-1"
+              >
+                ← 집계 현황으로 돌아가기
+              </Link>
             </div>
-          </div>
+          ) : (
+            <div className="space-y-6">
+              <div className="rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 p-6 shadow-md">
+                <h4 className="text-lg font-bold text-blue-900 mb-3">뭐든 자유롭게 말씀하세요</h4>
+                <ul className="space-y-2 text-sm text-blue-800">
+                  <li>• "○○ 제도가 불합리합니다" (민원)</li>
+                  <li>• "청년 주거 지원을 이렇게 바꾸면 어떨까요" (제안)</li>
+                  <li>• "○○법을 개정해야 합니다" (청원)</li>
+                  <li>• AI가 자동으로 분류하고 집계합니다</li>
+                </ul>
+              </div>
+
+              <div className="rounded-2xl bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200 p-6 shadow-md">
+                <h4 className="text-lg font-bold text-amber-900 mb-3">🔗 함께할수록 강해집니다</h4>
+                <p className="text-sm text-amber-800">
+                  같은 방향의 의견이 모일수록 집계 카운트가 올라가고,
+                  목표에 도달하면 AI가 공식 제안서를 자동 생성합니다.
+                </p>
+              </div>
+
+              {/* 핫 주제 TOP 5 */}
+              <div className="rounded-2xl bg-white border border-gray-200 p-6 shadow-md">
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="font-bold text-gray-900">🔥 지금 핫한 주제</h4>
+                  <Link href="/clusters" className="text-xs text-blue-600 hover:underline">전체 보기 →</Link>
+                </div>
+                {trending.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-4">아직 집계된 데이터가 없습니다</p>
+                ) : (
+                  <div className="space-y-2.5">
+                    {trending.map((item, i) => (
+                      <div key={item.topic || item.keyword} className="flex items-center gap-3">
+                        <span className="text-xs font-bold text-gray-400 w-4 flex-shrink-0">{i + 1}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-1">
+                            {item.cluster_id ? (
+                            <Link href={`/cluster/${item.cluster_id}`} className="text-sm font-medium text-blue-700 hover:underline truncate">
+                              {item.topic || item.keyword}
+                            </Link>
+                          ) : (
+                            <span className="text-sm font-medium text-gray-800 truncate">{item.topic || item.keyword}</span>
+                          )}
+                            <span className="text-xs text-gray-500 ml-2 flex-shrink-0">{item.total_count}</span>
+                          </div>
+                          <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-blue-400 to-blue-600"
+                              style={{ width: `${Math.round((item.total_count / maxCount) * 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </section>
       </div>
     </main>
