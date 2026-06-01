@@ -83,7 +83,6 @@ async def list_sessions(
     page_size: int = Query(20, ge=1, le=100),
     status: str = Query(None),
     classification: str = Query(None),
-    _: None = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """민원 목록 조회 (페이지네이션 + 필터).
