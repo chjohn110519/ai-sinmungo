@@ -4,9 +4,13 @@ from app.config import settings
 from app.storage.models import Base
 
 # 데이터베이스 엔진 생성
+_IS_SQLITE = "sqlite" in settings.database_url
 engine = create_engine(
     settings.database_url,
-    connect_args={"check_same_thread": False} if "sqlite" in settings.database_url else {},
+    connect_args={"check_same_thread": False} if _IS_SQLITE else {},
+    # Neon 등 서버리스 Postgres는 유휴 시 compute가 잠들며 연결을 끊는다.
+    # pre_ping으로 끊긴 연결을 감지해 재연결하고, 5분마다 연결을 교체한다.
+    **({} if _IS_SQLITE else {"pool_pre_ping": True, "pool_recycle": 300}),
 )
 
 # 세션 팩토리 생성

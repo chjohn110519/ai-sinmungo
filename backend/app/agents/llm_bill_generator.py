@@ -9,20 +9,16 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 try:
-    import instructor
-    from anthropic import Anthropic
     from openai import OpenAI
-    INSTRUCTOR_AVAILABLE = True
 except ImportError:
+    OpenAI = None
+
+try:
+    import instructor
+    INSTRUCTOR_AVAILABLE = OpenAI is not None
+except ImportError:
+    instructor = None
     INSTRUCTOR_AVAILABLE = False
-    try:
-        from openai import OpenAI
-    except ImportError:
-        OpenAI = None
-    try:
-        from anthropic import Anthropic
-    except ImportError:
-        Anthropic = None
 
 
 class BillArticle(BaseModel):
@@ -48,7 +44,6 @@ class LLMBillGenerator:
 
     def __init__(self):
         self.openai_client = None
-        self.anthropic_client = None
 
         if INSTRUCTOR_AVAILABLE:
             if settings.openai_api_key:
@@ -56,22 +51,12 @@ class LLMBillGenerator:
                     self.openai_client = instructor.from_openai(OpenAI(api_key=settings.openai_api_key))
                 except Exception as exc:
                     logger.warning("LLMBillGenerator OpenAI 클라이언트 초기화 실패: %s", exc)
-            if settings.anthropic_api_key:
-                try:
-                    self.anthropic_client = instructor.from_anthropic(Anthropic(api_key=settings.anthropic_api_key))
-                except Exception as exc:
-                    logger.warning("LLMBillGenerator Anthropic 클라이언트 초기화 실패: %s", exc)
         else:
             if OpenAI and settings.openai_api_key:
                 try:
                     self.openai_client = OpenAI(api_key=settings.openai_api_key)
                 except Exception as exc:
                     logger.warning("LLMBillGenerator OpenAI 클라이언트 초기화 실패 (instructor 없음): %s", exc)
-            if Anthropic and settings.anthropic_api_key:
-                try:
-                    self.anthropic_client = Anthropic(api_key=settings.anthropic_api_key)
-                except Exception as exc:
-                    logger.warning("LLMBillGenerator Anthropic 클라이언트 초기화 실패 (instructor 없음): %s", exc)
 
     def generate_bill(self, proposal: PolicyProposal, classification: str = "제안") -> FormalBill:
         """PolicyProposal을 정식 법안으로 변환."""
@@ -111,18 +96,6 @@ class LLMBillGenerator:
                     )
             except Exception as e:
                 logger.warning("LLMBillGenerator 법안 생성 오류(OpenAI): %s", e)
-
-        if self.anthropic_client is not None:
-            try:
-                if INSTRUCTOR_AVAILABLE:
-                    return self.anthropic_client.messages.create(
-                        model=settings.anthropic_model_name,
-                        max_tokens=2048,
-                        messages=[{"role": "user", "content": prompt}],
-                        response_model=FormalBill,
-                    )
-            except Exception as e:
-                logger.warning("LLMBillGenerator 법안 생성 오류(Anthropic): %s", e)
 
         # 폴백: 기본 법안 구조 반환
         return FormalBill(

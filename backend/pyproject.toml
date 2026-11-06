@@ -24,7 +24,6 @@ dependencies = [
     "httpx>=0.25.0",
     "python-dotenv>=1.0.0",
     "openai-whisper>=20231117",
-    "anthropic>=0.7.0",
     "pypdf>=6.10.2",
     "python-docx>=1.2.0",
     "pillow>=12.2.0",

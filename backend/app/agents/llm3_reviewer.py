@@ -6,20 +6,16 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 try:
-    import instructor
-    from anthropic import Anthropic
     from openai import OpenAI
-    INSTRUCTOR_AVAILABLE = True
 except ImportError:
+    OpenAI = None
+
+try:
+    import instructor
+    INSTRUCTOR_AVAILABLE = OpenAI is not None
+except ImportError:
+    instructor = None
     INSTRUCTOR_AVAILABLE = False
-    try:
-        from openai import OpenAI
-    except ImportError:
-        OpenAI = None
-    try:
-        from anthropic import Anthropic
-    except ImportError:
-        Anthropic = None
 
 _REVIEW_SYSTEM = (
     "당신은 APMP(Association of Proposal Management Professionals) 인증 레드팀 검토자입니다. "
@@ -40,7 +36,6 @@ class LLM3Reviewer:
 
     def __init__(self):
         self.openai_client = None
-        self.anthropic_client = None
 
         if INSTRUCTOR_AVAILABLE:
             if settings.openai_api_key:
@@ -50,24 +45,12 @@ class LLM3Reviewer:
                     )
                 except Exception as exc:
                     logger.warning("LLM3Reviewer OpenAI 클라이언트 초기화 실패: %s", exc)
-            if settings.anthropic_api_key:
-                try:
-                    self.anthropic_client = instructor.from_anthropic(
-                        Anthropic(api_key=settings.anthropic_api_key)
-                    )
-                except Exception as exc:
-                    logger.warning("LLM3Reviewer Anthropic 클라이언트 초기화 실패: %s", exc)
         else:
             if OpenAI and settings.openai_api_key:
                 try:
                     self.openai_client = OpenAI(api_key=settings.openai_api_key)
                 except Exception as exc:
                     logger.warning("LLM3Reviewer OpenAI 클라이언트 초기화 실패 (instructor 없음): %s", exc)
-            if Anthropic and settings.anthropic_api_key:
-                try:
-                    self.anthropic_client = Anthropic(api_key=settings.anthropic_api_key)
-                except Exception as exc:
-                    logger.warning("LLM3Reviewer Anthropic 클라이언트 초기화 실패 (instructor 없음): %s", exc)
 
     def _default_review(self) -> ProposalReview:
         return ProposalReview(
@@ -130,26 +113,6 @@ buyer_centric_score: 0.0~1.0 (독자 중심 언어 점수)"""
                     return self._openai_review_fallback(prompt)
             except Exception as e:
                 logger.warning("LLM3 검토 오류(OpenAI): %s", e)
-
-        if self.anthropic_client is not None:
-            try:
-                if INSTRUCTOR_AVAILABLE:
-                    return self.anthropic_client.messages.create(
-                        model=settings.anthropic_model_name,
-                        max_tokens=1024,
-                        system=_REVIEW_SYSTEM,
-                        messages=[{"role": "user", "content": prompt}],
-                        response_model=ProposalReview,
-                    )
-                else:
-                    response = self.anthropic_client.messages.create(
-                        model=settings.anthropic_model_name,
-                        max_tokens=1024,
-                        messages=[{"role": "user", "content": prompt}],
-                    )
-                    return self._parse_review(response.content[0].text)
-            except Exception as e:
-                logger.warning("LLM3 검토 오류(Anthropic): %s", e)
 
         return self._default_review()
 

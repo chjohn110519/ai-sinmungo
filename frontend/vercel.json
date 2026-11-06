@@ -5,8 +5,8 @@
   "installCommand": "npm install",
   "build": {
     "env": {
-      "NEXT_PUBLIC_API_URL": "https://ai-sinmungo-backend-production.up.railway.app",
-      "API_URL": "https://ai-sinmungo-backend-production.up.railway.app"
+      "NEXT_PUBLIC_API_URL": "https://ai-sinmungo-backend.onrender.com",
+      "API_URL": "https://ai-sinmungo-backend.onrender.com"
     }
   }
 }

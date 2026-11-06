@@ -98,7 +98,7 @@ class LLMQuestioner:
         try:
             questions = await _generate_with_httpx(
                 api_key=api_key,
-                model=(settings.openai_model_name or "gpt-3.5-turbo").strip(),
+                model=(settings.openai_model_name or "gpt-4o-mini").strip(),
                 message=message,
                 classification=classification,
                 n=n,

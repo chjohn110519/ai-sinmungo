@@ -8,20 +8,9 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 try:
-    import instructor
-    from anthropic import Anthropic
     from openai import OpenAI
-    INSTRUCTOR_AVAILABLE = True
 except ImportError:
-    INSTRUCTOR_AVAILABLE = False
-    try:
-        from openai import OpenAI
-    except ImportError:
-        OpenAI = None
-    try:
-        from anthropic import Anthropic
-    except ImportError:
-        Anthropic = None
+    OpenAI = None
 
 
 class LLM2Searcher:
@@ -30,7 +19,6 @@ class LLM2Searcher:
     def __init__(self, persist_dir: str = "./chroma_db"):
         self.retriever = None
         self.openai_client = None
-        self.anthropic_client = None
 
         if settings.enable_chroma:
             try:
@@ -47,11 +35,6 @@ class LLM2Searcher:
                 self.openai_client = OpenAI(api_key=settings.openai_api_key)
             except Exception as exc:
                 logger.warning("LLM2Searcher OpenAI 클라이언트 초기화 실패: %s", exc)
-        if settings.anthropic_api_key:
-            try:
-                self.anthropic_client = Anthropic(api_key=settings.anthropic_api_key)
-            except Exception as exc:
-                logger.warning("LLM2Searcher Anthropic 클라이언트 초기화 실패: %s", exc)
 
         # Chroma 컬렉션에 샘플 데이터가 없으면 초기화.
         # import/startup 시점 크래시 방지를 위해 명시적으로 켠 경우에만 실행한다.
@@ -74,18 +57,6 @@ class LLM2Searcher:
         )
 
         law_names: list[str] = []
-
-        if self.anthropic_client is not None:
-            try:
-                response = self.anthropic_client.messages.create(
-                    model=settings.anthropic_model_name,
-                    max_tokens=256,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                text = response.content[0].text
-                law_names = [l.strip() for l in text.strip().splitlines() if l.strip()]
-            except Exception as e:
-                logger.warning("LLM2Searcher Anthropic 법령 제안 오류: %s", e)
 
         if not law_names and self.openai_client is not None:
             try:

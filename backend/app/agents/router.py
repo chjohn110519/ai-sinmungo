@@ -6,20 +6,16 @@ from app.schemas.routing import RoutingResult
 logger = logging.getLogger(__name__)
 
 try:
-    import instructor
-    from anthropic import Anthropic
     from openai import OpenAI
-    INSTRUCTOR_AVAILABLE = True
 except ImportError:
+    OpenAI = None
+
+try:
+    import instructor
+    INSTRUCTOR_AVAILABLE = OpenAI is not None
+except ImportError:
+    instructor = None
     INSTRUCTOR_AVAILABLE = False
-    try:
-        from anthropic import Anthropic
-    except ImportError:
-        Anthropic = None
-    try:
-        from openai import OpenAI
-    except ImportError:
-        OpenAI = None
 
 
 SYSTEM_PROMPT = "당신은 국민신문고 민원 분류 전문가입니다."
@@ -76,7 +72,6 @@ CLASSIFY_PROMPT = """사용자 입력을 분석하여 아래 정보를 추출하
 class AIRouter:
     def __init__(self):
         self.openai_client = None
-        self.anthropic_client = None
 
         if INSTRUCTOR_AVAILABLE:
             if settings.openai_api_key:
@@ -86,24 +81,12 @@ class AIRouter:
                     )
                 except Exception as exc:
                     logger.warning("AIRouter OpenAI 클라이언트 초기화 실패: %s", exc)
-            if settings.anthropic_api_key:
-                try:
-                    self.anthropic_client = instructor.from_anthropic(
-                        Anthropic(api_key=settings.anthropic_api_key)
-                    )
-                except Exception as exc:
-                    logger.warning("AIRouter Anthropic 클라이언트 초기화 실패: %s", exc)
         else:
             if settings.openai_api_key:
                 try:
                     self.openai_client = OpenAI(api_key=settings.openai_api_key)
                 except Exception as exc:
                     logger.warning("AIRouter OpenAI 클라이언트 초기화 실패 (instructor 없음): %s", exc)
-            if Anthropic and settings.anthropic_api_key:
-                try:
-                    self.anthropic_client = Anthropic(api_key=settings.anthropic_api_key)
-                except Exception as exc:
-                    logger.warning("AIRouter Anthropic 클라이언트 초기화 실패 (instructor 없음): %s", exc)
 
     def route_message(self, message: str) -> RoutingResult:
         """사용자 메시지를 민원/제안/청원으로 분류"""
@@ -143,32 +126,6 @@ class AIRouter:
                     return result
             except Exception as exc:
                 logger.warning("AIRouter OpenAI 라우터 오류: %s", exc)
-
-        if self.anthropic_client is not None:
-            try:
-                if INSTRUCTOR_AVAILABLE:
-                    return self.anthropic_client.messages.create(
-                        model=settings.anthropic_model_name,
-                        max_tokens=512,
-                        messages=[{"role": "user", "content": prompt}],
-                        response_model=RoutingResult,
-                    )
-                else:
-                    response = self.anthropic_client.messages.create(
-                        model=settings.anthropic_model_name,
-                        max_tokens=512,
-                        messages=[{"role": "user", "content": prompt}],
-                    )
-                    result = self._fallback_parse(response.content[0].text)
-                    if result.confidence <= 0.55:
-                        kw_result = _ml_or_keyword_classify(message)
-                        if kw_result.classification != "민원":
-                            result.classification = kw_result.classification
-                            result.topic = kw_result.topic
-                            result.keywords = result.keywords or kw_result.keywords
-                    return result
-            except Exception as exc:
-                logger.warning("AIRouter Anthropic 라우터 오류: %s", exc)
 
         return _ml_or_keyword_classify(message)
 

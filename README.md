@@ -68,7 +68,7 @@ flowchart LR
 ## 기술 스택
 
 - **Backend**: FastAPI, LangGraph, Pydantic, Instructor, SQLAlchemy (SQLite / PostgreSQL)
-- **LLM**: OpenAI GPT 계열 (기본), Anthropic Claude (대체 경로) — 모델명은 환경변수로 지정
+- **LLM**: OpenAI GPT 계열 (기본 gpt-4o-mini) — 모델명은 `OPENAI_MODEL_NAME` 환경변수로 지정
 - **검색**: 국가법령정보센터 Open API, Tavily 웹 검색, Chroma + Ko-SRoBERTa 임베딩 (선택)
 - **ML**: KoBERT, scikit-learn, LightGBM
 - **음성**: OpenAI Whisper API
@@ -116,7 +116,6 @@ npm run dev   # http://localhost:3000
 ```
 OPENAI_API_KEY=            # 필수
 OPENAI_MODEL_NAME=gpt-4o-mini
-ANTHROPIC_API_KEY=         # 선택
 LAW_API_KEY=               # 선택, https://open.law.go.kr 발급 (미설정 시 샘플 법령 데이터)
 TAVILY_API_KEY=            # 선택, 웹 검색
 ENABLE_CHROMA=false        # true 시 Chroma 벡터 검색 활성화

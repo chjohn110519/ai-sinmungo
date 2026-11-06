@@ -13,15 +13,13 @@ class Settings(BaseSettings):
     model_config = ConfigDict(env_file=".env", case_sensitive=False, extra="allow")
 
     # API Keys (strip whitespace/newlines in case env var was set with trailing newline)
-    anthropic_api_key: Optional[str] = None
+    # LLM은 OpenAI만 사용한다.
     openai_api_key: Optional[str] = None
 
     def model_post_init(self, __context):
         """환경변수에 포함된 줄바꿈/공백 제거."""
         if self.openai_api_key:
             object.__setattr__(self, "openai_api_key", self.openai_api_key.strip())
-        if self.anthropic_api_key:
-            object.__setattr__(self, "anthropic_api_key", self.anthropic_api_key.strip())
         if self.tavily_api_key:
             object.__setattr__(self, "tavily_api_key", self.tavily_api_key.strip())
         if self.admin_api_key:
@@ -47,9 +45,8 @@ class Settings(BaseSettings):
 
     # Models
     embedding_model_name: str = "jhgan/ko-sroberta-multitask"
-    llm_model_name: str = "claude-3-5-sonnet-20241022"
-    anthropic_model_name: str = "claude-3-5-sonnet-20241022"
-    openai_model_name: str = "gpt-3.5-turbo"
+    # 모든 LLM 에이전트가 사용하는 OpenAI 모델 (OPENAI_MODEL_NAME 환경변수로 변경)
+    openai_model_name: str = "gpt-4o-mini"
     backend_model: str = "gpt-4o-mini"
 
     # 국가법령정보센터 API (https://open.law.go.kr 에서 발급)
