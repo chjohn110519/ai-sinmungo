@@ -26,6 +26,15 @@ class Settings(BaseSettings):
             object.__setattr__(self, "tavily_api_key", self.tavily_api_key.strip())
         if self.admin_api_key:
             object.__setattr__(self, "admin_api_key", self.admin_api_key.strip())
+        # Render/Heroku 등은 postgres:// 스킴을 주지만 SQLAlchemy 2.x는 이를 인식하지 못하고,
+        # SQLAlchemy 2.1+는 postgresql:// 의 기본 드라이버가 psycopg(v3)라서
+        # 설치된 psycopg2-binary를 명시적으로 지정한다.
+        url = self.database_url.strip()
+        for prefix in ("postgres://", "postgresql://"):
+            if url.startswith(prefix):
+                url = "postgresql+psycopg2://" + url[len(prefix):]
+                break
+        object.__setattr__(self, "database_url", url)
 
     # Database
     database_url: str = _DEFAULT_DB

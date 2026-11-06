@@ -1,0 +1,5 @@
+# KoBERT 가결/기간 예측용 (ML_ENABLE_KOBERT=true 일 때만 필요, RAM 2GB 이상 권장)
+# Docker 빌드에서는 CPU 전용 torch를 먼저 설치한 뒤 이 파일을 설치한다.
+torch>=2.0.0
+transformers>=4.35.0
+sentencepiece>=0.1.99

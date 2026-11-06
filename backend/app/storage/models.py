@@ -15,7 +15,7 @@ class ProposalCluster(Base):
     topic = Column(String, nullable=False)               # 대주제 (교통, 환경, ...)
     keywords = Column(JSON, nullable=False, default=list) # 핵심 키워드 목록
     responsible_dept = Column(String, nullable=False)
-    classification = Column(Enum("제안", "청원"), nullable=False)
+    classification = Column(Enum("제안", "청원", native_enum=False, length=50), nullable=False)
     count = Column(Integer, default=1)                   # 집계된 입력 수
     threshold = Column(Integer, default=50)              # Agent 2 트리거 임계치
     triggered = Column(Boolean, default=False)           # Agent 2 트리거 여부
@@ -29,9 +29,9 @@ class Session(Base):
 
     session_id = Column(String, primary_key=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    user_input_mode = Column(Enum("text", "voice"), default="text")
-    final_classification = Column(Enum("민원", "제안", "청원"), nullable=True)
-    status = Column(Enum("in_progress", "classified", "aggregated", "structured", "completed", "failed"), default="in_progress")
+    user_input_mode = Column(Enum("text", "voice", native_enum=False, length=50), default="text")
+    final_classification = Column(Enum("민원", "제안", "청원", native_enum=False, length=50), nullable=True)
+    status = Column(Enum("in_progress", "classified", "aggregated", "structured", "completed", "failed", native_enum=False, length=50), default="in_progress")
     cluster_id = Column(String, ForeignKey("proposal_clusters.cluster_id"), nullable=True)
     conversation_stage = Column(String, nullable=True, default="init")
     conversation_context = Column(JSON, nullable=True)
@@ -42,7 +42,7 @@ class Message(Base):
 
     message_id = Column(String, primary_key=True)
     session_id = Column(String, ForeignKey("sessions.session_id"))
-    role = Column(Enum("user", "assistant"))
+    role = Column(Enum("user", "assistant", native_enum=False, length=50))
     content = Column(Text)
     agent_name = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -106,7 +106,7 @@ class LegalDocument(Base):
     __tablename__ = "legal_documents"
 
     doc_id = Column(String, primary_key=True)
-    doc_type = Column(Enum("law", "petition", "bill", "민원사례"))
+    doc_type = Column(Enum("law", "petition", "bill", "민원사례", native_enum=False, length=50))
     title = Column(String)
     content = Column(Text)
     source_url = Column(String, nullable=True)

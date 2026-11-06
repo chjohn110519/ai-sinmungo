@@ -263,11 +263,23 @@ def seed_if_empty(db: DBSession) -> None:
     now = datetime.utcnow()
     triggered_cluster_id = str(uuid.uuid4())
 
+    # 제안서가 참조할 세션을 먼저 저장 (PostgreSQL은 FK를 강제하므로 필수,
+    # SQLite는 기본적으로 FK를 검사하지 않아 이전에는 드러나지 않았음)
+    seed_proposal_session_id = f"seed-{triggered_cluster_id}"
+    db.add(SessionModel(
+        session_id=seed_proposal_session_id,
+        final_classification=_SEED_CLUSTERS[0]["classification"],
+        status="completed",
+        conversation_stage="seed",
+        created_at=now - timedelta(days=14),
+    ))
+    db.flush()
+
     # 트리거된 클러스터의 제안서를 먼저 저장 (FK 제약 때문)
     proposal_id = str(uuid.uuid4())
     db_proposal = StructuredProposal(
         proposal_id=proposal_id,
-        session_id=f"seed-{triggered_cluster_id}",
+        session_id=seed_proposal_session_id,
         title=_TRIGGERED_PROPOSAL["title"],
         background=_TRIGGERED_PROPOSAL["background"],
         core_requests=_TRIGGERED_PROPOSAL["core_requests"],

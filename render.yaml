@@ -1,20 +1,66 @@
+# Render Blueprint — AI 신문고 (백엔드 + 프론트엔드 + PostgreSQL)
+# Render Dashboard → New → Blueprint → 이 저장소 선택 시 아래 리소스가 한 번에 생성된다.
+# sync: false 항목은 최초 생성 시 대시보드에서 값을 입력하라는 프롬프트가 뜬다.
+
+databases:
+  - name: ai-sinmungo-db
+    plan: free            # 무료 DB는 생성 30일 후 만료 → 계속 쓰려면 basic-256mb 등으로 업그레이드
+    region: singapore
+    databaseName: sinmungo
+    user: sinmungo
+
 services:
+  # ── 백엔드 (FastAPI, Docker) ───────────────────────────────
   - type: web
     name: ai-sinmungo-backend
     runtime: docker
+    plan: starter         # RAM 512MB, 슬립 없음. KoBERT를 켜려면 standard(2GB) 이상 필요
+    region: singapore
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     healthCheckPath: /health
+    autoDeploy: true
     envVars:
-      - key: OPENAI_API_KEY
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ai-sinmungo-db
+          property: connectionString
+      - key: OPENAI_API_KEY        # 필수: GPT-4o-mini, Whisper STT
         sync: false
+      - key: ANTHROPIC_API_KEY     # 선택: 라우터 fallback
+        sync: false
+      - key: TAVILY_API_KEY        # 선택: 웹 검색
+        sync: false
+      - key: LAW_API_KEY           # 선택: 국가법령정보센터
+        sync: false
+      - key: ADMIN_API_KEY         # 선택: 설정 시 관리자 API에 X-Admin-Api-Key 헤더 필요
+        sync: false
+      - key: BACKEND_MODEL
+        value: gpt-4o-mini
       - key: OPENAI_MODEL_NAME
         value: gpt-4o-mini
-      - key: DATABASE_URL
-        value: sqlite:///./data/app.db
+      - key: ML_ENABLE_KOBERT      # Dockerfile build arg로도 전달됨. true로 바꾸면 plan도 standard로 올릴 것
+        value: "false"
+      - key: ENABLE_CHROMA
+        value: "false"
       - key: DEBUG
         value: "false"
-    disk:
-      name: data
-      mountPath: /app/data
-      sizeGB: 1
+
+  # ── 프론트엔드 (Next.js) ───────────────────────────────────
+  - type: web
+    name: ai-sinmungo
+    runtime: node
+    plan: free            # 15분 무요청 시 슬립 (첫 접속 30~60초 지연)
+    region: singapore
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # 빌드 시점에 번들에 포함되므로 백엔드 URL이 바뀌면 프론트를 재배포해야 한다
+      - key: NEXT_PUBLIC_API_URL
+        value: https://ai-sinmungo-backend.onrender.com
+      - key: API_URL
+        value: https://ai-sinmungo-backend.onrender.com
